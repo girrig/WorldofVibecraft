@@ -1,0 +1,195 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+  background: #000;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #fff;
+}
+
+/* Login Screen */
+#login-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a0a2e 0%, #16213e 50%, #0a1628 100%);
+  z-index: 100;
+}
+
+.login-box {
+  text-align: center;
+  padding: 40px 60px;
+  border: 2px solid #c9aa71;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 40px rgba(201, 170, 113, 0.3);
+}
+
+.login-box h1 {
+  font-size: 42px;
+  color: #c9aa71;
+  text-shadow: 0 0 20px rgba(201, 170, 113, 0.5);
+  margin-bottom: 8px;
+}
+
+.login-box p {
+  color: #8899aa;
+  margin-bottom: 24px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+}
+
+.login-box input {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid #c9aa71;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 16px;
+  outline: none;
+}
+
+.login-box input:focus {
+  border-color: #e8d5a3;
+  box-shadow: 0 0 10px rgba(201, 170, 113, 0.4);
+}
+
+.login-box button {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #c9aa71;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #3d2a1a 0%, #2a1a0e 100%);
+  color: #c9aa71;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: all 0.2s;
+}
+
+.login-box button:hover {
+  background: linear-gradient(180deg, #4d3a2a 0%, #3a2a1e 100%);
+  box-shadow: 0 0 15px rgba(201, 170, 113, 0.4);
+}
+
+/* Game Canvas */
+#game-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* HUD */
+#hud {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  font-size: 13px;
+  color: #ccc;
+  text-shadow: 1px 1px 2px #000;
+  pointer-events: none;
+}
+
+#hud-coords, #hud-players {
+  margin-bottom: 4px;
+}
+
+/* Minimap */
+#minimap {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  width: 150px;
+  height: 150px;
+  border: 2px solid #c9aa71;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#minimap-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* Chat */
+#chat-container {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  width: 400px;
+}
+
+#chat-log {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: none;
+  scrollbar-width: none;
+}
+
+#chat-log::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-message {
+  margin-bottom: 2px;
+  text-shadow: 1px 1px 2px #000;
+}
+
+.chat-message .name {
+  color: #c9aa71;
+  font-weight: bold;
+}
+
+.chat-message .system {
+  color: #ffcc00;
+  font-style: italic;
+}
+
+#chat-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+  display: none;
+}
+
+#chat-input.active {
+  display: block;
+}
+
+#chat-input:focus {
+  border-color: #c9aa71;
+}
+
+/* Crosshair */
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  display: none;
+}

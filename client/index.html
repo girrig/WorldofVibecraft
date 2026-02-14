@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>World of Vibecraft</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="login-screen">
+    <div class="login-box">
+      <h1>World of Vibecraft</h1>
+      <p>Enter the realm</p>
+      <input type="text" id="player-name" placeholder="Enter your name" maxlength="20" autofocus />
+      <button id="join-btn">Enter World</button>
+    </div>
+  </div>
+
+  <div id="game-container" style="display: none;">
+    <canvas id="game-canvas"></canvas>
+
+    <div id="hud">
+      <div id="hud-coords"></div>
+      <div id="hud-players"></div>
+    </div>
+
+    <div id="minimap">
+      <canvas id="minimap-canvas" width="150" height="150"></canvas>
+    </div>
+
+    <div id="chat-container">
+      <div id="chat-log"></div>
+      <input type="text" id="chat-input" placeholder="Press Enter to chat..." maxlength="200" />
+    </div>
+
+    <div id="crosshair">+</div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
