@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node server/index.js\" \"vite client --port 3001\"",
+    "dev": "concurrently \"node server/index.js\" \"vite client --port 3002\"",
     "build": "vite build client",
     "start": "node server/index.js",
     "server": "node server/index.js"

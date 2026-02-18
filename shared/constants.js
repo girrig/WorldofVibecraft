@@ -18,8 +18,8 @@ export const CAMERA_MAX_DISTANCE = 25;
 export const CAMERA_DEFAULT_DISTANCE = 8;
 export const CAMERA_SENSITIVITY = 0.003;
 
-export const SERVER_PORT = 3000;
-export const WS_PORT = 3000;
+export const SERVER_PORT = 3001;
+export const WS_PORT = 3001;
 
 export const MSG = {
   JOIN: 'join',

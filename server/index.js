@@ -12,7 +12,7 @@ const app = express();
 const server = createServer(app);
 
 // Serve static client files (for production)
-app.use(express.static(path.join(__dirname, '..', 'client')));
+app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
 
 // WebSocket server
 const wss = new WebSocketServer({ server });

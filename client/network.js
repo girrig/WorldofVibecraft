@@ -11,10 +11,7 @@ export class NetworkClient {
   connect(name) {
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const host = window.location.hostname;
-      // In dev, connect to the server port (3000); in prod, same port
-      const port = 3000;
-      this.ws = new WebSocket(`${protocol}://${host}:${port}`);
+      this.ws = new WebSocket(`${protocol}://${window.location.host}`);
 
       this.ws.onopen = () => {
         this.connected = true;
