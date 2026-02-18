@@ -11,7 +11,7 @@ export class NetworkClient {
   connect(name) {
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      this.ws = new WebSocket(`${protocol}://${window.location.host}`);
+      this.ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
 
       this.ws.onopen = () => {
         this.connected = true;

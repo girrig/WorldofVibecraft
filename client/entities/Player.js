@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RUN_SPEED, BACKPEDAL_FACTOR, TURN_SPEED } from '../../shared/constants.js';
 import { getTerrainHeight } from '../world/Terrain.js';
 
@@ -6,6 +7,30 @@ const PLAYER_COLORS = [
   0x4488ff, 0xff4444, 0x44ff44, 0xffaa00, 0xff44ff,
   0x44ffff, 0xff8844, 0x8844ff, 0x44ff88, 0xff4488,
 ];
+
+// Cached loaded model
+let cachedModel = null;
+let modelLoading = null;
+
+export function preloadPlayerModel() {
+  if (modelLoading) return modelLoading;
+  modelLoading = new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    loader.load(
+      '/assets/models/human_male.glb',
+      (gltf) => {
+        cachedModel = gltf.scene;
+        cachedModel.traverse((child) => {
+          if (child.isMesh) child.castShadow = true;
+        });
+        resolve(cachedModel);
+      },
+      undefined,
+      reject
+    );
+  });
+  return modelLoading;
+}
 
 export function getPlayerColor(id) {
   let hash = 0;
@@ -19,29 +44,32 @@ export function getPlayerColor(id) {
 export function createPlayerMesh(color = 0x4488ff) {
   const group = new THREE.Group();
 
-  // Body
-  const bodyGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.0, 8);
-  const bodyMat = new THREE.MeshStandardMaterial({ color });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 0.9;
-  body.castShadow = true;
-  group.add(body);
+  if (cachedModel) {
+    const model = cachedModel.clone();
+    group.add(model);
+  } else {
+    // Fallback placeholder while model loads
+    const bodyGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.0, 8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.9;
+    body.castShadow = true;
+    group.add(body);
 
-  // Head
-  const headGeo = new THREE.SphereGeometry(0.28, 8, 8);
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.y = 1.65;
-  head.castShadow = true;
-  group.add(head);
+    const headGeo = new THREE.SphereGeometry(0.28, 8, 8);
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.65;
+    head.castShadow = true;
+    group.add(head);
 
-  // Shoulders
-  const shoulderGeo = new THREE.BoxGeometry(0.9, 0.2, 0.4);
-  const shoulderMat = new THREE.MeshStandardMaterial({ color });
-  const shoulders = new THREE.Mesh(shoulderGeo, shoulderMat);
-  shoulders.position.y = 1.35;
-  shoulders.castShadow = true;
-  group.add(shoulders);
+    const shoulderGeo = new THREE.BoxGeometry(0.9, 0.2, 0.4);
+    const shoulderMat = new THREE.MeshStandardMaterial({ color });
+    const shoulders = new THREE.Mesh(shoulderGeo, shoulderMat);
+    shoulders.position.y = 1.35;
+    shoulders.castShadow = true;
+    group.add(shoulders);
+  }
 
   return group;
 }

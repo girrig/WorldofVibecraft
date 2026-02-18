@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MSG, SPAWN_AREA } from '../shared/constants.js';
 import { createTerrain } from './world/Terrain.js';
 import { createEnvironment, createLighting, createSky } from './world/Environment.js';
-import { LocalPlayer } from './entities/Player.js';
+import { LocalPlayer, preloadPlayerModel } from './entities/Player.js';
 import { RemotePlayer } from './entities/RemotePlayer.js';
 import { PlayerControls } from './controls/PlayerControls.js';
 import { NetworkClient } from './network.js';
@@ -46,6 +46,9 @@ async function startGame() {
   try {
     // Initialize rendering
     initRenderer();
+
+    // Preload player model and connect to server in parallel
+    await preloadPlayerModel().catch((err) => console.warn('Model load failed, using fallback:', err));
 
     // Connect to server
     network = new NetworkClient();
