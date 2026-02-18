@@ -1,0 +1,31 @@
+name: Pull and Restart via SSH
+on:
+  push:
+    branches: [ main ]  # Trigger on push to main branch
+  workflow_dispatch:    # Allow manual triggering
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Setup SSH key
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    
+    - name: Add host key to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan "${{ secrets.DROPLET_IP }}" >> ~/.ssh/known_hosts
+    
+    - name: SSH, Pull and Restart
+      run: |
+        ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} '
+          cd ${{ secrets.DEPLOY_PATH }} &&
+          git pull origin main &&
+          source ~/.nvm/nvm.sh &&
+          nvm use default &&
+          yarn install &&
+          yarn build &&
+          (pm2 restart WorldofVibecraft || pm2 start yarn --name "WorldofVibecraft" -- start)
+        '
