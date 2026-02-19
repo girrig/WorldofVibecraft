@@ -3,7 +3,7 @@
 Extract WoW 3.3.5a models from MPQ archives to glTF (.glb) format.
 
 Usage:
-    python extract_model.py --data-dir "C:\Path\To\Data" --model "Character\Human\Male\HumanMale" --output "../client/assets/models/human_male.glb"
+    python extract_model.py --data-dir "C:\Path\To\Data" --model "Character\Human\Male\HumanMale" --output "../client/public/assets/models/human_male.glb"
 """
 
 import argparse
@@ -262,6 +262,126 @@ def parse_skin(data):
     return local_to_global, indices, submeshes, batches
 
 
+# ── M2 bone & animation parsing ──────────────────────────────────────────────
+
+# Animation IDs we want to extract
+WANTED_ANIMATION_IDS = {0: "Stand", 4: "Walk", 5: "Run", 13: "WalkBackwards"}
+
+
+def parse_m2_sequences(data, header_offset=0x01C):
+    """Parse animation sequence definitions (64 bytes each)."""
+    count, offset = read_m2array(data, header_offset)
+    sequences = []
+    for i in range(count):
+        s_off = offset + i * 64
+        anim_id, variation = struct.unpack_from("<HH", data, s_off)
+        duration = struct.unpack_from("<I", data, s_off + 4)[0]
+        movespeed = struct.unpack_from("<f", data, s_off + 8)[0]
+        flags = struct.unpack_from("<I", data, s_off + 12)[0]
+        sequences.append({
+            "id": anim_id,
+            "variation": variation,
+            "duration": duration,
+            "movespeed": movespeed,
+            "flags": flags,
+            "index": i,
+        })
+    return sequences
+
+
+def parse_m2_track(m2_data, track_offset, value_size, value_fmt):
+    """
+    Parse an M2Track (20 bytes: interp u16, global_seq i16, ts_array M2Array, val_array M2Array).
+    Returns dict {seq_index: {"timestamps": [...], "values": [...], "interpolation": int}}
+    """
+    interp_type = struct.unpack_from("<H", m2_data, track_offset)[0]
+    global_seq = struct.unpack_from("<h", m2_data, track_offset + 2)[0]
+    ts_count, ts_offset = struct.unpack_from("<II", m2_data, track_offset + 4)
+    val_count, val_offset = struct.unpack_from("<II", m2_data, track_offset + 12)
+
+    track_data = {}
+    for seq_idx in range(min(ts_count, val_count)):
+        # Inner M2Array for this sequence's timestamps and values
+        inner_ts_count, inner_ts_offset = struct.unpack_from("<II", m2_data, ts_offset + seq_idx * 8)
+        inner_val_count, inner_val_offset = struct.unpack_from("<II", m2_data, val_offset + seq_idx * 8)
+
+        if inner_ts_count == 0 or inner_val_count == 0:
+            continue
+
+        try:
+            timestamps = list(struct.unpack_from(f"<{inner_ts_count}I", m2_data, inner_ts_offset))
+            values = []
+            for j in range(inner_val_count):
+                v = struct.unpack_from(value_fmt, m2_data, inner_val_offset + j * value_size)
+                values.append(v)
+            track_data[seq_idx] = {
+                "timestamps": timestamps,
+                "values": values,
+                "interpolation": interp_type,
+            }
+        except struct.error:
+            continue
+
+    return track_data
+
+
+def parse_m2_bones(m2_data, header_offset=0x02C):
+    """Parse M2CompBone structures (88 bytes each). Returns list of bone dicts."""
+    count, offset = read_m2array(m2_data, header_offset)
+    bones = []
+    for i in range(count):
+        b_off = offset + i * 88
+        key_bone_id = struct.unpack_from("<i", m2_data, b_off)[0]
+        flags = struct.unpack_from("<I", m2_data, b_off + 4)[0]
+        parent = struct.unpack_from("<h", m2_data, b_off + 8)[0]
+        submesh_id = struct.unpack_from("<H", m2_data, b_off + 10)[0]
+
+        # Parse animation tracks
+        # Translation: vec3 float (12 bytes, "<3f")
+        translation = parse_m2_track(m2_data, b_off + 16, 12, "<3f")
+        # Rotation: CompQuat int16 x4 (8 bytes, "<4h")
+        rotation = parse_m2_track(m2_data, b_off + 36, 8, "<4h")
+        # Scale: vec3 float (12 bytes, "<3f")
+        scale = parse_m2_track(m2_data, b_off + 56, 12, "<3f")
+
+        pivot = struct.unpack_from("<3f", m2_data, b_off + 76)
+
+        bones.append({
+            "key_bone_id": key_bone_id,
+            "flags": flags,
+            "parent": parent,
+            "submesh_id": submesh_id,
+            "pivot": pivot,
+            "translation": translation,
+            "rotation": rotation,
+            "scale": scale,
+        })
+    return bones
+
+
+def wow_to_gltf_pos(x, y, z):
+    """Convert WoW Z-up position to glTF Y-up: (x,y,z) -> (x, z, -y)."""
+    return (x, z, -y)
+
+
+def wow_to_gltf_quat(qx, qy, qz, qw):
+    """Convert WoW quaternion to glTF coordinate system.
+    Axis components transform like positions: (x,y,z) -> (x, z, -y)
+    Returns (x, y, z, w) in glTF convention."""
+    return (qx, qz, -qy, qw)
+
+
+def _comp_to_float(v):
+    """Decompress a single M2 CompQuat component (offset-encoded int16 → float [-1,1])."""
+    return (v + 32768) / 32767.0 if v < 0 else (v - 32767) / 32767.0
+
+
+def decompress_quat(x, y, z, w):
+    """Decompress M2 CompQuat (int16 x4) to float quaternion, then convert to glTF coords."""
+    fx, fy, fz, fw = _comp_to_float(x), _comp_to_float(y), _comp_to_float(z), _comp_to_float(w)
+    return wow_to_gltf_quat(fx, fy, fz, fw)
+
+
 # ── BLP texture handling ─────────────────────────────────────────────────────
 
 def blp_to_png_bytes(blp_data):
@@ -280,22 +400,23 @@ def blp_to_png_bytes(blp_data):
 
 # ── glTF construction ────────────────────────────────────────────────────────
 
-def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=None, geoset_filter=None):
+def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=None,
+              geoset_filter=None, bones=None, sequences=None):
     """
-    Build a GLB file from parsed M2 + skin data.
-    geoset_filter: set of submesh IDs to include. If None, includes all.
-    Splits mesh into body (skin texture) and hair (solid color) primitives.
-    Returns bytes of the .glb file.
+    Build a GLB file from parsed M2 + skin data, optionally with skeletal animation.
+    Returns a pygltflib.GLTF2 object.
     """
-    # Shared vertex buffer
+    has_skeleton = bones is not None and len(bones) > 0
+    num_bones = len(bones) if has_skeleton else 0
+
+    # ── Vertex data ──────────────────────────────────────────────────────
     all_positions = []
     all_normals = []
     all_uvs = []
-
-    # Separate index lists: body vs hair
-    body_indices = []
-    hair_indices = []
-
+    all_joints = []
+    all_weights = []
+    body_indices_list = []
+    hair_indices_list = []
     global_to_output = {}
     output_idx = 0
 
@@ -304,10 +425,8 @@ def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=Non
             continue
         if geoset_filter is not None and sub["id"] not in geoset_filter:
             continue
-
-        # Hairstyles are group 0 IDs 1-99
         is_hair = 1 <= sub["id"] <= 99
-        target = hair_indices if is_hair else body_indices
+        target = hair_indices_list if is_hair else body_indices_list
 
         for i in range(sub["index_start"], sub["index_start"] + sub["index_count"]):
             local_idx = indices[i]
@@ -319,6 +438,17 @@ def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=Non
                 all_positions.append([pos[0], pos[2], -pos[1]])
                 all_normals.append([norm[0], norm[2], -norm[1]])
                 all_uvs.append([v["uv0"][0], v["uv0"][1]])
+                if has_skeleton:
+                    bi = list(v["bone_indices"])
+                    # Clamp bone indices to valid range
+                    bi = [min(b, num_bones - 1) for b in bi]
+                    all_joints.append(bi)
+                    bw = list(v["bone_weights"])
+                    total_w = sum(bw)
+                    if total_w > 0:
+                        all_weights.append([w / total_w for w in bw])
+                    else:
+                        all_weights.append([1.0, 0.0, 0.0, 0.0])
                 global_to_output[global_idx] = output_idx
                 output_idx += 1
             target.append(global_to_output[global_idx])
@@ -327,46 +457,58 @@ def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=Non
     normals = np.array(all_normals, dtype=np.float32)
     uvs = np.array(all_uvs, dtype=np.float32)
     idx_type = np.uint16 if output_idx < 65536 else np.uint32
-    body_idx_arr = np.array(body_indices, dtype=idx_type)
-    hair_idx_arr = np.array(hair_indices, dtype=idx_type) if hair_indices else None
+    body_idx_arr = np.array(body_indices_list, dtype=idx_type)
+    hair_idx_arr = np.array(hair_indices_list, dtype=idx_type) if hair_indices_list else None
+    num_verts = len(positions)
 
-    print(f"  Body: {len(body_idx_arr) // 3} tris, Hair: {len(hair_indices) // 3} tris, Verts: {len(positions)}")
+    print(f"  Body: {len(body_idx_arr) // 3} tris, Hair: {len(hair_indices_list) // 3} tris, Verts: {num_verts}")
+
+    if has_skeleton:
+        joints_arr = np.array(all_joints, dtype=np.uint8)
+        weights_arr = np.array(all_weights, dtype=np.float32)
 
     def pad4(b):
         rem = len(b) % 4
         return b + b"\x00" * (4 - rem) if rem else b
 
-    # Binary layout: body_indices | hair_indices | positions | normals | uvs | [texture]
-    body_idx_bytes = pad4(body_idx_arr.tobytes())
-    hair_idx_bytes = pad4(hair_idx_arr.tobytes()) if hair_idx_arr is not None else b""
-    pos_bytes = pad4(positions.tobytes())
-    norm_bytes = pad4(normals.tobytes())
-    uv_bytes = pad4(uvs.tobytes())
+    # ── Binary buffer (bytearray for easy appending) ─────────────────────
+    bin_data = bytearray()
 
-    body_idx_offset = 0
-    hair_idx_offset = body_idx_offset + len(body_idx_bytes)
-    pos_offset = hair_idx_offset + len(hair_idx_bytes)
-    norm_offset = pos_offset + len(pos_bytes)
-    uv_offset = norm_offset + len(norm_bytes)
+    def append_bin(data_bytes):
+        """Append padded data to bin_data, return its starting offset."""
+        offset = len(bin_data)
+        bin_data.extend(pad4(data_bytes))
+        return offset
 
-    total_bin = body_idx_bytes + hair_idx_bytes + pos_bytes + norm_bytes + uv_bytes
+    body_idx_offset = append_bin(body_idx_arr.tobytes())
+    hair_idx_offset = append_bin(hair_idx_arr.tobytes()) if hair_idx_arr is not None else 0
+    pos_offset = append_bin(positions.tobytes())
+    norm_offset = append_bin(normals.tobytes())
+    uv_offset = append_bin(uvs.tobytes())
+    joints_offset = append_bin(joints_arr.tobytes()) if has_skeleton else 0
+    weights_offset = append_bin(weights_arr.tobytes()) if has_skeleton else 0
 
-    # Texture
-    tex_offset = len(total_bin)
+    # Inverse bind matrices
+    ibm_offset = 0
+    if has_skeleton:
+        ibm_floats = []
+        for bone in bones:
+            px, py, pz = wow_to_gltf_pos(*bone["pivot"])
+            # IBM = T(-pivot) in column-major layout
+            ibm_floats.extend([1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  -px, -py, -pz, 1])
+        ibm_offset = append_bin(np.array(ibm_floats, dtype=np.float32).tobytes())
+
+    # Texture image data
+    tex_offset = 0
     has_texture = texture_pngs and len(texture_pngs) > 0 and texture_pngs[0] is not None
     if has_texture:
-        total_bin += pad4(texture_pngs[0])
+        tex_offset = append_bin(texture_pngs[0])
 
+    # ── Buffer views ─────────────────────────────────────────────────────
     pos_min = positions.min(axis=0).tolist()
     pos_max = positions.max(axis=0).tolist()
     idx_ct = 5123 if idx_type == np.uint16 else 5125
 
-    # --- Buffer views ---
-    # 0: body indices
-    # 1: hair indices (if present)
-    # 2: positions
-    # 3: normals
-    # 4: uvs
     bv_list = [
         pygltflib.BufferView(buffer=0, byteOffset=body_idx_offset,
                              byteLength=len(body_idx_arr) * body_idx_arr.itemsize, target=34963),
@@ -374,22 +516,30 @@ def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=Non
     hair_idx_bv = None
     if hair_idx_arr is not None and len(hair_idx_arr) > 0:
         hair_idx_bv = len(bv_list)
-        bv_list.append(
-            pygltflib.BufferView(buffer=0, byteOffset=hair_idx_offset,
-                                 byteLength=len(hair_idx_arr) * hair_idx_arr.itemsize, target=34963),
-        )
+        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=hair_idx_offset,
+                       byteLength=len(hair_idx_arr) * hair_idx_arr.itemsize, target=34963))
     pos_bv = len(bv_list)
     bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=pos_offset,
-                   byteLength=len(positions) * 12, target=34962, byteStride=12))
+                   byteLength=num_verts * 12, target=34962, byteStride=12))
     norm_bv = len(bv_list)
     bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=norm_offset,
-                   byteLength=len(normals) * 12, target=34962, byteStride=12))
+                   byteLength=num_verts * 12, target=34962, byteStride=12))
     uv_bv = len(bv_list)
     bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=uv_offset,
-                   byteLength=len(uvs) * 8, target=34962, byteStride=8))
+                   byteLength=num_verts * 8, target=34962, byteStride=8))
 
-    # --- Accessors ---
-    # 0: body indices
+    if has_skeleton:
+        joints_bv = len(bv_list)
+        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=joints_offset,
+                       byteLength=num_verts * 4, target=34962, byteStride=4))
+        weights_bv = len(bv_list)
+        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=weights_offset,
+                       byteLength=num_verts * 16, target=34962, byteStride=16))
+        ibm_bv = len(bv_list)
+        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=ibm_offset,
+                       byteLength=num_bones * 64))
+
+    # ── Accessors ────────────────────────────────────────────────────────
     acc_list = [
         pygltflib.Accessor(bufferView=0, componentType=idx_ct,
                            count=len(body_idx_arr), type="SCALAR",
@@ -398,39 +548,172 @@ def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=Non
     hair_idx_acc = None
     if hair_idx_arr is not None and len(hair_idx_arr) > 0:
         hair_idx_acc = len(acc_list)
-        acc_list.append(
-            pygltflib.Accessor(bufferView=hair_idx_bv, componentType=idx_ct,
-                               count=len(hair_idx_arr), type="SCALAR",
-                               max=[int(hair_idx_arr.max())], min=[int(hair_idx_arr.min())]),
-        )
+        acc_list.append(pygltflib.Accessor(bufferView=hair_idx_bv, componentType=idx_ct,
+                        count=len(hair_idx_arr), type="SCALAR",
+                        max=[int(hair_idx_arr.max())], min=[int(hair_idx_arr.min())]))
     pos_acc = len(acc_list)
     acc_list.append(pygltflib.Accessor(bufferView=pos_bv, componentType=5126,
-                    count=len(positions), type="VEC3", max=pos_max, min=pos_min))
+                    count=num_verts, type="VEC3", max=pos_max, min=pos_min))
     norm_acc = len(acc_list)
     acc_list.append(pygltflib.Accessor(bufferView=norm_bv, componentType=5126,
-                    count=len(normals), type="VEC3"))
+                    count=num_verts, type="VEC3"))
     uv_acc = len(acc_list)
     acc_list.append(pygltflib.Accessor(bufferView=uv_bv, componentType=5126,
-                    count=len(uvs), type="VEC2"))
+                    count=num_verts, type="VEC2"))
 
-    # --- Primitives ---
+    if has_skeleton:
+        joints_acc = len(acc_list)
+        acc_list.append(pygltflib.Accessor(bufferView=joints_bv, componentType=5121,
+                        count=num_verts, type="VEC4"))
+        weights_acc = len(acc_list)
+        acc_list.append(pygltflib.Accessor(bufferView=weights_bv, componentType=5126,
+                        count=num_verts, type="VEC4"))
+        ibm_acc = len(acc_list)
+        acc_list.append(pygltflib.Accessor(bufferView=ibm_bv, componentType=5126,
+                        count=num_bones, type="MAT4"))
+
+    # ── Mesh primitives ──────────────────────────────────────────────────
     attrs = pygltflib.Attributes(POSITION=pos_acc, NORMAL=norm_acc, TEXCOORD_0=uv_acc)
-    primitives = [
-        pygltflib.Primitive(attributes=attrs, indices=0, material=0),  # body
-    ]
-    if hair_idx_acc is not None:
-        primitives.append(
-            pygltflib.Primitive(attributes=attrs, indices=hair_idx_acc, material=1),  # hair
-        )
+    if has_skeleton:
+        attrs.JOINTS_0 = joints_acc
+        attrs.WEIGHTS_0 = weights_acc
 
+    primitives = [pygltflib.Primitive(attributes=attrs, indices=0, material=0)]
+    if hair_idx_acc is not None:
+        primitives.append(pygltflib.Primitive(attributes=attrs, indices=hair_idx_acc, material=1))
+
+    # ── Nodes: [mesh_node, bone_0, bone_1, ...] ─────────────────────────
+    nodes = []
+    if has_skeleton:
+        root_bone_nodes = [i + 1 for i, b in enumerate(bones) if b["parent"] == -1]
+        nodes.append(pygltflib.Node(mesh=0, skin=0, children=root_bone_nodes))
+        for i, bone in enumerate(bones):
+            px, py, pz = wow_to_gltf_pos(*bone["pivot"])
+            if bone["parent"] >= 0:
+                ppx, ppy, ppz = wow_to_gltf_pos(*bones[bone["parent"]]["pivot"])
+                tx, ty, tz = px - ppx, py - ppy, pz - ppz
+            else:
+                tx, ty, tz = px, py, pz
+            children = [j + 1 for j, b in enumerate(bones) if b["parent"] == i]
+            node = pygltflib.Node(name=f"Bone_{i}", translation=[tx, ty, tz],
+                                  rotation=[0, 0, 0, 1], scale=[1, 1, 1])
+            if children:
+                node.children = children
+            nodes.append(node)
+    else:
+        nodes.append(pygltflib.Node(mesh=0))
+
+    # ── Skin ─────────────────────────────────────────────────────────────
+    skins = []
+    if has_skeleton:
+        first_root = next((i + 1 for i, b in enumerate(bones) if b["parent"] == -1), 1)
+        skins.append(pygltflib.Skin(
+            joints=list(range(1, num_bones + 1)),
+            inverseBindMatrices=ibm_acc,
+            skeleton=first_root))
+
+    # ── Animations ───────────────────────────────────────────────────────
+    gltf_animations = []
+    if has_skeleton and sequences:
+        for seq in sequences:
+            if seq["id"] not in WANTED_ANIMATION_IDS or seq["variation"] != 0:
+                continue
+            anim_name = WANTED_ANIMATION_IDS[seq["id"]]
+            seq_idx = seq["index"]
+            channels = []
+            samplers = []
+
+            for bone_idx, bone in enumerate(bones):
+                joint_node_idx = bone_idx + 1
+
+                # ── Rotation channel ──
+                if seq_idx in bone["rotation"]:
+                    track = bone["rotation"][seq_idx]
+                    n_kf = min(len(track["timestamps"]), len(track["values"]))
+                    if n_kf >= 1:
+                        ts = np.array([t / 1000.0 for t in track["timestamps"][:n_kf]], dtype=np.float32)
+                        vals = []
+                        for qx, qy, qz, qw in track["values"][:n_kf]:
+                            gx, gy, gz, gw = decompress_quat(qx, qy, qz, qw)
+                            vals.extend([gx, gy, gz, gw])
+                        val_arr = np.array(vals, dtype=np.float32)
+
+                        ts_bvi = len(bv_list)
+                        ts_off = append_bin(ts.tobytes())
+                        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=ts_off, byteLength=n_kf * 4))
+                        val_bvi = len(bv_list)
+                        val_off = append_bin(val_arr.tobytes())
+                        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=val_off, byteLength=n_kf * 16))
+
+                        ts_ai = len(acc_list)
+                        acc_list.append(pygltflib.Accessor(bufferView=ts_bvi, componentType=5126,
+                                        count=n_kf, type="SCALAR",
+                                        max=[float(ts.max())], min=[float(ts.min())]))
+                        val_ai = len(acc_list)
+                        acc_list.append(pygltflib.Accessor(bufferView=val_bvi, componentType=5126,
+                                        count=n_kf, type="VEC4"))
+
+                        si = len(samplers)
+                        samplers.append(pygltflib.AnimationSampler(input=ts_ai, output=val_ai, interpolation="LINEAR"))
+                        channels.append(pygltflib.AnimationChannel(sampler=si,
+                                        target=pygltflib.AnimationChannelTarget(node=joint_node_idx, path="rotation")))
+
+                # ── Translation channel ──
+                if seq_idx in bone["translation"]:
+                    track = bone["translation"][seq_idx]
+                    n_kf = min(len(track["timestamps"]), len(track["values"]))
+                    if n_kf >= 1:
+                        # Compute pivot offset for this bone
+                        px, py, pz = wow_to_gltf_pos(*bone["pivot"])
+                        if bone["parent"] >= 0:
+                            ppx, ppy, ppz = wow_to_gltf_pos(*bones[bone["parent"]]["pivot"])
+                            poff = (px - ppx, py - ppy, pz - ppz)
+                        else:
+                            poff = (px, py, pz)
+
+                        ts = np.array([t / 1000.0 for t in track["timestamps"][:n_kf]], dtype=np.float32)
+                        vals = []
+                        for tvx, tvy, tvz in track["values"][:n_kf]:
+                            gx, gy, gz = wow_to_gltf_pos(tvx, tvy, tvz)
+                            vals.extend([poff[0] + gx, poff[1] + gy, poff[2] + gz])
+                        val_arr = np.array(vals, dtype=np.float32)
+
+                        ts_bvi = len(bv_list)
+                        ts_off = append_bin(ts.tobytes())
+                        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=ts_off, byteLength=n_kf * 4))
+                        val_bvi = len(bv_list)
+                        val_off = append_bin(val_arr.tobytes())
+                        bv_list.append(pygltflib.BufferView(buffer=0, byteOffset=val_off, byteLength=n_kf * 12))
+
+                        ts_ai = len(acc_list)
+                        acc_list.append(pygltflib.Accessor(bufferView=ts_bvi, componentType=5126,
+                                        count=n_kf, type="SCALAR",
+                                        max=[float(ts.max())], min=[float(ts.min())]))
+                        val_ai = len(acc_list)
+                        acc_list.append(pygltflib.Accessor(bufferView=val_bvi, componentType=5126,
+                                        count=n_kf, type="VEC3"))
+
+                        si = len(samplers)
+                        samplers.append(pygltflib.AnimationSampler(input=ts_ai, output=val_ai, interpolation="LINEAR"))
+                        channels.append(pygltflib.AnimationChannel(sampler=si,
+                                        target=pygltflib.AnimationChannelTarget(node=joint_node_idx, path="translation")))
+
+            if channels:
+                gltf_animations.append(pygltflib.Animation(
+                    name=anim_name, channels=channels, samplers=samplers))
+                print(f"  Animation '{anim_name}': {len(channels)} channels, {seq['duration']}ms")
+
+    # ── Assemble glTF ────────────────────────────────────────────────────
     gltf = pygltflib.GLTF2(
         scene=0,
         scenes=[pygltflib.Scene(nodes=[0])],
-        nodes=[pygltflib.Node(mesh=0)],
+        nodes=nodes,
         meshes=[pygltflib.Mesh(primitives=primitives)],
+        skins=skins,
+        animations=gltf_animations,
         accessors=acc_list,
         bufferViews=bv_list,
-        buffers=[pygltflib.Buffer(byteLength=len(total_bin))],
+        buffers=[pygltflib.Buffer(byteLength=len(bin_data))],
         materials=[], textures=[], images=[], samplers=[],
     )
 
@@ -461,7 +744,7 @@ def build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs=Non
             metallicFactor=0.0, roughnessFactor=0.9),
         doubleSided=True))
 
-    gltf.set_binary_blob(total_bin)
+    gltf.set_binary_blob(bytes(bin_data))
     return gltf
 
 
@@ -616,6 +899,18 @@ def main():
                         texture_pngs.append(png_data)
                         break
 
+    # Parse bones and animations
+    print("\n  Parsing animation sequences...")
+    m2_sequences = parse_m2_sequences(m2_data)
+    print(f"  Found {len(m2_sequences)} animation sequences")
+    for seq in m2_sequences:
+        if seq["id"] in WANTED_ANIMATION_IDS and seq["variation"] == 0:
+            print(f"    {WANTED_ANIMATION_IDS[seq['id']]}: seq_idx={seq['index']}, {seq['duration']}ms")
+
+    print("  Parsing bones...")
+    m2_bones = parse_m2_bones(m2_data)
+    print(f"  Found {len(m2_bones)} bones")
+
     # Determine geoset filter
     geoset_filter = DEFAULT_GEOSETS.get(model_path)
     if geoset_filter:
@@ -625,7 +920,8 @@ def main():
 
     # Build glTF
     print("Building glTF...")
-    gltf = build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs, geoset_filter)
+    gltf = build_glb(m2_vertices, local_to_global, indices, submeshes, texture_pngs, geoset_filter,
+                      bones=m2_bones, sequences=m2_sequences)
 
     # Save
     print(f"Saving to {output_path}...")

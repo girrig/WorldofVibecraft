@@ -4,3 +4,9 @@ dist/
 tools/.venv/
 __pycache__/
 *.pyc
+package-lock.json
+tools/check_*.py
+tools/diagnose_*.py
+tools/validate_*.py
+tools/validate_*.mjs
+tools/*.json

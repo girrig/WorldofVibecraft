@@ -1,24 +1,48 @@
 import * as THREE from 'three';
 import { createPlayerMesh, getPlayerColor } from './Player.js';
 
+const FADE_DURATION = 0.2;
+const MOVE_THRESHOLD = 0.01; // Min distance per update to count as moving
+
 export class RemotePlayer {
   constructor(id, name, position) {
     this.id = id;
     this.name = name;
     this.color = getPlayerColor(id);
-    this.mesh = createPlayerMesh(this.color);
+
+    const { group, mixer, actions } = createPlayerMesh(this.color);
+    this.mesh = group;
+    this.mixer = mixer;
+    this.actions = actions;
+    this.currentAction = null;
 
     // Position interpolation
     this.currentPos = new THREE.Vector3(position.x, position.y, position.z);
     this.targetPos = new THREE.Vector3(position.x, position.y, position.z);
+    this.prevPos = new THREE.Vector3(position.x, position.y, position.z);
     this.currentRot = 0;
     this.targetRot = 0;
 
     this.mesh.position.copy(this.currentPos);
 
+    // Start idle
+    this.playAnimation('Stand');
+
     // Nameplate
     this.nameplate = this.createNameplate(name);
     this.mesh.add(this.nameplate);
+  }
+
+  playAnimation(name) {
+    if (!this.mixer || !this.actions[name]) return;
+    if (this.currentAction === this.actions[name]) return;
+
+    const newAction = this.actions[name];
+    if (this.currentAction) {
+      this.currentAction.fadeOut(FADE_DURATION);
+    }
+    newAction.reset().fadeIn(FADE_DURATION).play();
+    this.currentAction = newAction;
   }
 
   createNameplate(name) {
@@ -61,14 +85,29 @@ export class RemotePlayer {
 
     // Smooth rotation interpolation
     let rotDiff = this.targetRot - this.currentRot;
-    // Handle wrap-around
     while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
     while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
     this.currentRot += rotDiff * lerpFactor;
     this.mesh.rotation.y = this.currentRot;
+
+    // Detect movement for animation
+    const dx = this.currentPos.x - this.prevPos.x;
+    const dz = this.currentPos.z - this.prevPos.z;
+    const moveDist = Math.sqrt(dx * dx + dz * dz);
+    this.prevPos.copy(this.currentPos);
+
+    if (moveDist > MOVE_THRESHOLD * dt) {
+      this.playAnimation('Run');
+    } else {
+      this.playAnimation('Stand');
+    }
+
+    // Update animation mixer
+    if (this.mixer) this.mixer.update(dt);
   }
 
   dispose() {
+    if (this.mixer) this.mixer.stopAllAction();
     this.mesh.traverse((child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) {

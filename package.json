@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "gltf-validator": "^2.0.0-dev.3.10",
     "vite": "^6.0.0"
   }
 }

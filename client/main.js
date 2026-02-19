@@ -178,10 +178,42 @@ function addRemotePlayer(playerData) {
   scene.add(rp.mesh);
 }
 
+function createOverlay() {
+  const overlay = document.createElement('div');
+  overlay.id = 'emote-overlay';
+
+  // Walk/Run toggle indicator
+  const toggle = document.createElement('span');
+  toggle.className = 'emote-key walk-toggle active';
+  toggle.innerHTML = '<b>/</b> Run';
+  overlay.appendChild(toggle);
+
+  document.getElementById('game-container').appendChild(overlay);
+}
+
+function updateWalkToggle() {
+  const toggle = document.querySelector('.walk-toggle');
+  if (!toggle) return;
+  const isWalk = localPlayer.walkMode;
+  toggle.innerHTML = `<b>/</b> ${isWalk ? 'Walk' : 'Run'}`;
+  toggle.classList.toggle('walk-active', isWalk);
+}
+
 function setupInput() {
+  createOverlay();
+
   document.addEventListener('keydown', (e) => {
     if (chatBox.isOpen) return;
     const key = e.key.toLowerCase();
+
+    // Walk/Run toggle
+    if (key === '/') {
+      e.preventDefault();
+      localPlayer.walkMode = !localPlayer.walkMode;
+      updateWalkToggle();
+      return;
+    }
+
     localPlayer.setKey(key, true);
 
     // W also cancels autorun

@@ -6,6 +6,7 @@ export const SPAWN_AREA = 20; // Players spawn within this radius of origin
 
 // Movement (WoW-style)
 export const RUN_SPEED = 7; // Units per second (forward)
+export const WALK_FACTOR = 0.36;      // Walk mode moves at 36% of run speed
 export const BACKPEDAL_FACTOR = 0.64; // S key moves at 64% of run speed
 export const TURN_SPEED = Math.PI; // 180 degrees per second (keyboard turning)
 
