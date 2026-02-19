@@ -47,12 +47,13 @@ export function getPlayerColor(id) {
 
 /**
  * Create a player mesh with optional animation support.
- * Returns { group, mixer, actions } where mixer/actions are null if no skeleton.
+ * Returns { group, mixer, actions, spineBone } where mixer/actions are null if no skeleton.
  */
 export function createPlayerMesh(color = 0x4488ff) {
   const group = new THREE.Group();
   let mixer = null;
   let actions = {};
+  let spineBone = null;
 
   if (cachedModel) {
     // SkeletonUtils.clone properly handles skinned meshes
@@ -60,6 +61,8 @@ export function createPlayerMesh(color = 0x4488ff) {
     model.rotation.y = Math.PI / 2; // WoW model faces +X, Three.js forward is -Z
     model.traverse((child) => {
       if (child.isMesh) child.castShadow = true;
+      // Bone_2 = WoW key_bone_id 4 (SpineLow / "Upper Body")
+      if (child.isBone && child.name === 'Bone_2') spineBone = child;
     });
     group.add(model);
 
@@ -96,10 +99,12 @@ export function createPlayerMesh(color = 0x4488ff) {
     group.add(shoulders);
   }
 
-  return { group, mixer, actions };
+  return { group, mixer, actions, spineBone };
 }
 
 const FADE_DURATION = 0.2; // seconds for animation crossfade
+const LOWER_BODY_TURN_FRACTION = 1.0; // full rotation toward movement direction (matches classic WoW)
+const TWIST_SPEED = 40; // near-instant transition (~2-4 frames at 60fps, matches classic WoW)
 
 export class LocalPlayer {
   constructor(id, name) {
@@ -109,11 +114,13 @@ export class LocalPlayer {
     this.characterYaw = 0;
     this.color = getPlayerColor(id);
 
-    const { group, mixer, actions } = createPlayerMesh(this.color);
+    const { group, mixer, actions, spineBone } = createPlayerMesh(this.color);
     this.mesh = group;
     this.mixer = mixer;
     this.actions = actions;
     this.currentAction = null;
+    this.spineBone = spineBone;
+    this.currentLowerBodyTurn = 0;
 
     // Start with idle animation
     this.playAnimation('Stand');
@@ -203,6 +210,22 @@ export class LocalPlayer {
     // Update animation mixer
     if (this.mixer) this.mixer.update(dt);
 
+    // --- Split body: lower body turns toward diagonal movement direction ---
+    let lowerBodyTarget = 0;
+    if (isMoving && moveZ <= 0 && Math.abs(moveX) > 0) {
+      // Forward + strafe: rotate lower body (legs) toward actual movement direction
+      const localAngle = Math.atan2(moveX, -moveZ);
+      lowerBodyTarget = -localAngle * LOWER_BODY_TURN_FRACTION;
+    }
+    this.currentLowerBodyTurn += (lowerBodyTarget - this.currentLowerBodyTurn) * Math.min(1, TWIST_SPEED * dt);
+
+    // Counter-rotate spine so upper body keeps facing character direction
+    if (this.spineBone && Math.abs(this.currentLowerBodyTurn) > 0.001) {
+      const twistQuat = new THREE.Quaternion();
+      twistQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -this.currentLowerBodyTurn);
+      this.spineBone.quaternion.multiply(twistQuat);
+    }
+
     // Snap to terrain
     this.position.y = getTerrainHeight(this.position.x, this.position.z);
 
@@ -213,7 +236,7 @@ export class LocalPlayer {
 
     // Update mesh
     this.mesh.position.copy(this.position);
-    this.mesh.rotation.y = this.characterYaw;
+    this.mesh.rotation.y = this.characterYaw + this.currentLowerBodyTurn;
   }
 
   setKey(key, pressed) {

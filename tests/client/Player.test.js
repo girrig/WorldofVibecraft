@@ -343,6 +343,81 @@ describe('LocalPlayer', () => {
       player.update(dt, createMockControls());
       expect(spy).toHaveBeenCalledWith('WalkBackwards');
     });
+
+    it('plays Run when only strafing (Q key)', () => {
+      player.setKey('q', true);
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(dt, createMockControls());
+      expect(spy).toHaveBeenCalledWith('Run');
+    });
+
+    it('plays Run when moving forward + strafing', () => {
+      player.setKey('w', true);
+      player.setKey('q', true);
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(dt, createMockControls());
+      expect(spy).toHaveBeenCalledWith('Run');
+    });
+  });
+
+  describe('update — split body rotation', () => {
+    it('forward + strafe left converges to +45° (PI/4)', () => {
+      player.setKey('w', true);
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(Math.PI / 4, 1);
+    });
+
+    it('forward + strafe right converges to -45° (-PI/4)', () => {
+      player.setKey('w', true);
+      player.setKey('e', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(-Math.PI / 4, 1);
+    });
+
+    it('pure strafe left converges to +90° (PI/2)', () => {
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(Math.PI / 2, 1);
+    });
+
+    it('pure strafe right converges to -90° (-PI/2)', () => {
+      player.setKey('e', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(-Math.PI / 2, 1);
+    });
+
+    it('no lower body turn when moving straight forward', () => {
+      player.setKey('w', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(0, 5);
+    });
+
+    it('no lower body turn when backpedaling', () => {
+      player.setKey('s', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(0, 5);
+    });
+
+    it('lower body turn returns to zero when stopping', () => {
+      player.setKey('w', true);
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).not.toBeCloseTo(0, 2);
+      player.setKey('w', false);
+      player.setKey('q', false);
+      for (let i = 0; i < 60; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(0, 2);
+    });
+
+    it('mesh rotation includes lower body offset during diagonal movement', () => {
+      player.setKey('w', true);
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.mesh.rotation.y).toBeCloseTo(
+        player.characterYaw + player.currentLowerBodyTurn, 5
+      );
+    });
   });
 
   describe('update — mesh sync', () => {
@@ -354,10 +429,10 @@ describe('LocalPlayer', () => {
       expect(player.mesh.position.z).toBeCloseTo(player.position.z, 5);
     });
 
-    it('mesh rotation matches characterYaw after update', () => {
+    it('mesh rotation matches characterYaw when standing still', () => {
       player.characterYaw = 1.5;
       player.update(dt, createMockControls());
-      expect(player.mesh.rotation.y).toBe(player.characterYaw);
+      expect(player.mesh.rotation.y).toBeCloseTo(player.characterYaw, 5);
     });
   });
 });

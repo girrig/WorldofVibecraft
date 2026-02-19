@@ -192,7 +192,9 @@ describe('PlayerControls', () => {
     it('ignores mouse move when no buttons held', () => {
       const startYaw = controls.cameraYaw;
       const startPitch = controls.cameraPitch;
-      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 100, movementY: 100 }));
+      const event = new MouseEvent('mousemove');
+      Object.defineProperties(event, { movementX: { value: 100 }, movementY: { value: 100 } });
+      document.dispatchEvent(event);
       expect(controls.cameraYaw).toBe(startYaw);
       expect(controls.cameraPitch).toBe(startPitch);
     });
@@ -200,14 +202,18 @@ describe('PlayerControls', () => {
     it('rotates camera yaw on mouse move with right button held', () => {
       canvas._fire('mousedown', { button: 2 });
       const startYaw = controls.cameraYaw;
-      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 100, movementY: 0 }));
+      const event = new MouseEvent('mousemove');
+      Object.defineProperties(event, { movementX: { value: 100 }, movementY: { value: 0 } });
+      document.dispatchEvent(event);
       expect(controls.cameraYaw).not.toBe(startYaw);
     });
 
     it('rotates camera pitch on mouse move with left button held', () => {
       canvas._fire('mousedown', { button: 0 });
       const startPitch = controls.cameraPitch;
-      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: 100 }));
+      const event = new MouseEvent('mousemove');
+      Object.defineProperties(event, { movementX: { value: 0 }, movementY: { value: 100 } });
+      document.dispatchEvent(event);
       expect(controls.cameraPitch).not.toBe(startPitch);
     });
 
@@ -215,7 +221,9 @@ describe('PlayerControls', () => {
       canvas._fire('mousedown', { button: 2 });
       // Extreme upward movement
       for (let i = 0; i < 100; i++) {
-        document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: -1000 }));
+        const event = new MouseEvent('mousemove');
+        Object.defineProperties(event, { movementX: { value: 0 }, movementY: { value: -1000 } });
+        document.dispatchEvent(event);
       }
       expect(controls.cameraPitch).toBeGreaterThan(-Math.PI / 2);
     });
@@ -224,7 +232,9 @@ describe('PlayerControls', () => {
       canvas._fire('mousedown', { button: 2 });
       // Extreme downward movement
       for (let i = 0; i < 100; i++) {
-        document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: 1000 }));
+        const event = new MouseEvent('mousemove');
+        Object.defineProperties(event, { movementX: { value: 0 }, movementY: { value: 1000 } });
+        document.dispatchEvent(event);
       }
       expect(controls.cameraPitch).toBeLessThan(Math.PI / 2);
     });
