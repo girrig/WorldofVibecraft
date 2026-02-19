@@ -4,6 +4,8 @@ dist/
 tools/.venv/
 __pycache__/
 *.pyc
+coverage/
+.claude/
 package-lock.json
 tools/check_*.py
 tools/diagnose_*.py
