@@ -6,6 +6,15 @@ import {
   CAMERA_SENSITIVITY,
 } from '../../shared/constants.js';
 
+function isChildOf(object, parent) {
+  let current = object;
+  while (current) {
+    if (current === parent) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 export class PlayerControls {
   constructor(camera, canvas) {
     this.camera = camera;
@@ -82,7 +91,7 @@ export class PlayerControls {
     }, { passive: false });
   }
 
-  update(playerPosition, characterYaw, scene) {
+  update(playerPosition, characterYaw, scene, localPlayerMesh) {
     const focusPoint = new THREE.Vector3(
       playerPosition.x,
       playerPosition.y + 1.5,
@@ -104,8 +113,9 @@ export class PlayerControls {
       const ray = new THREE.Raycaster(focusPoint, dir, 0, this.distance + 1);
       const hits = ray.intersectObjects(scene.children, true);
 
-      // Find nearest non-player hit
+      // Find nearest hit that isn't the local player's own mesh
       for (const hit of hits) {
+        if (localPlayerMesh && isChildOf(hit.object, localPlayerMesh)) continue;
         if (hit.distance < this.distance && hit.distance > 0.5) {
           const collisionPos = focusPoint.clone().add(dir.multiplyScalar(hit.distance - 0.3));
           this.camera.position.copy(collisionPos);

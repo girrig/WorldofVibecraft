@@ -236,7 +236,7 @@ function animate() {
   localPlayer.update(dt, controls);
 
   // Update camera (pass character yaw and scene for collision)
-  controls.update(localPlayer.position, localPlayer.characterYaw, scene);
+  controls.update(localPlayer.position, localPlayer.characterYaw, scene, localPlayer.mesh);
 
   // Update remote players
   for (const [, rp] of remotePlayers) {

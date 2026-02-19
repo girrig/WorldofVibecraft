@@ -57,6 +57,7 @@ export function createPlayerMesh(color = 0x4488ff) {
   if (cachedModel) {
     // SkeletonUtils.clone properly handles skinned meshes
     const model = SkeletonUtils.clone(cachedModel);
+    model.rotation.y = Math.PI / 2; // WoW model faces +X, Three.js forward is -Z
     model.traverse((child) => {
       if (child.isMesh) child.castShadow = true;
     });
