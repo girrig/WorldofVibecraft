@@ -24,6 +24,7 @@ const mockCtx = {
 HTMLCanvasElement.prototype.getContext = vi.fn(() => mockCtx);
 
 import { RemotePlayer } from '../../client/entities/RemotePlayer.js';
+import { getTerrainHeight } from '../../client/world/Terrain.js';
 
 describe('RemotePlayer', () => {
   let player;
@@ -137,6 +138,64 @@ describe('RemotePlayer', () => {
       player.update(0.05); // Second update — no movement
 
       expect(spy).toHaveBeenCalledWith('Stand');
+    });
+  });
+
+  describe('update — airborne detection', () => {
+    it('plays Jump animation when significantly above terrain', () => {
+      const x = 10, z = 20;
+      const terrainY = getTerrainHeight(x, z);
+      // Place player well above terrain
+      const highY = terrainY + 2;
+      player.currentPos.set(x, highY, z);
+      player.targetPos.set(x, highY, z);
+      player.prevPos.set(x, highY, z);
+
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(0.05);
+
+      expect(spy).toHaveBeenCalledWith('Jump');
+    });
+
+    it('does not play Jump when at terrain height', () => {
+      const x = 10, z = 20;
+      const terrainY = getTerrainHeight(x, z);
+      player.currentPos.set(x, terrainY, z);
+      player.targetPos.set(x, terrainY, z);
+      player.prevPos.set(x, terrainY, z);
+
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(0.05);
+
+      expect(spy).not.toHaveBeenCalledWith('Jump');
+    });
+
+    it('does not play Jump when barely above terrain (within threshold)', () => {
+      const x = 10, z = 20;
+      const terrainY = getTerrainHeight(x, z);
+      // 0.2 is within the 0.3 threshold
+      player.currentPos.set(x, terrainY + 0.2, z);
+      player.targetPos.set(x, terrainY + 0.2, z);
+      player.prevPos.set(x, terrainY + 0.2, z);
+
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(0.05);
+
+      expect(spy).not.toHaveBeenCalledWith('Jump');
+    });
+
+    it('plays Run when moving on ground (not airborne)', () => {
+      const x = 10, z = 20;
+      const terrainY = getTerrainHeight(x, z);
+      // Set previous position far away so movement is detected
+      player.currentPos.set(x, terrainY, z);
+      player.targetPos.set(x, terrainY, z);
+      player.prevPos.set(x - 5, terrainY, z);
+
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(0.05);
+
+      expect(spy).toHaveBeenCalledWith('Run');
     });
   });
 

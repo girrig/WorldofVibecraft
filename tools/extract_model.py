@@ -265,7 +265,7 @@ def parse_skin(data):
 # ── M2 bone & animation parsing ──────────────────────────────────────────────
 
 # Animation IDs we want to extract
-WANTED_ANIMATION_IDS = {0: "Stand", 4: "Walk", 5: "Run", 13: "WalkBackwards"}
+WANTED_ANIMATION_IDS = {0: "Stand", 4: "Walk", 5: "Run", 13: "WalkBackwards", 38: "Jump"}
 
 
 def parse_m2_sequences(data, header_offset=0x01C):

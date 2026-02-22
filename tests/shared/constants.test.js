@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   TICK_RATE, TICK_INTERVAL, WORLD_SIZE, SPAWN_AREA,
   RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED,
+  GRAVITY, JUMP_VELOCITY,
   PLAYER_HEIGHT, PLAYER_RADIUS,
   CAMERA_MIN_DISTANCE, CAMERA_MAX_DISTANCE, CAMERA_DEFAULT_DISTANCE, CAMERA_SENSITIVITY,
   SERVER_PORT, WS_PORT, MSG,
@@ -35,6 +36,32 @@ describe('Game Constants', () => {
   it('backpedal factor slows movement below run speed', () => {
     expect(BACKPEDAL_FACTOR).toBeGreaterThan(0);
     expect(BACKPEDAL_FACTOR).toBeLessThan(1);
+  });
+
+  it('walk factor matches WoW default (2.5 yd/s)', () => {
+    expect(RUN_SPEED * WALK_FACTOR).toBeCloseTo(2.5, 5);
+  });
+
+  it('backpedal factor matches WoW default (4.5 yd/s)', () => {
+    expect(RUN_SPEED * BACKPEDAL_FACTOR).toBeCloseTo(4.5, 5);
+  });
+
+  it('gravity matches WoW client value', () => {
+    expect(GRAVITY).toBeCloseTo(19.2911, 3);
+  });
+
+  it('jump velocity matches WoW client value', () => {
+    expect(JUMP_VELOCITY).toBeCloseTo(7.9555, 3);
+  });
+
+  it('jump peak height is ~1.64 yards (WoW)', () => {
+    const peakHeight = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * GRAVITY);
+    expect(peakHeight).toBeCloseTo(1.64, 1);
+  });
+
+  it('jump airtime is ~0.825 seconds (WoW)', () => {
+    const airtime = (2 * JUMP_VELOCITY) / GRAVITY;
+    expect(airtime).toBeCloseTo(0.825, 1);
   });
 
   it('camera distance constraints are ordered', () => {

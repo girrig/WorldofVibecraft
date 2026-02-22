@@ -13,7 +13,8 @@ vi.mock('three/addons/utils/SkeletonUtils.js', () => ({
 }));
 
 import { LocalPlayer, getPlayerColor } from '../../client/entities/Player.js';
-import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED } from '../../shared/constants.js';
+import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY } from '../../shared/constants.js';
+import { getTerrainHeight } from '../../client/world/Terrain.js';
 
 // Mock controls object
 function createMockControls(overrides = {}) {
@@ -79,6 +80,16 @@ describe('LocalPlayer', () => {
     it('has a mesh group', () => {
       expect(player.mesh).toBeDefined();
       expect(player.mesh.position).toBeDefined();
+    });
+
+    it('starts grounded with zero vertical velocity', () => {
+      expect(player.grounded).toBe(true);
+      expect(player.velocityY).toBe(0);
+    });
+
+    it('includes space key in keys', () => {
+      expect(player.keys).toHaveProperty(' ');
+      expect(player.keys[' ']).toBe(false);
     });
   });
 
@@ -417,6 +428,159 @@ describe('LocalPlayer', () => {
       expect(player.mesh.rotation.y).toBeCloseTo(
         player.characterYaw + player.currentLowerBodyTurn, 5
       );
+    });
+  });
+
+  describe('update — jumping', () => {
+    // Player starts at y=0 but terrain at origin is ~1.5, so we must
+    // ground the player first before testing jumps.
+    function groundPlayer() {
+      player.update(dt, createMockControls());
+    }
+
+    it('space key initiates jump when grounded', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      expect(player.grounded).toBe(false);
+      expect(player.velocityY).toBeGreaterThan(0);
+    });
+
+    it('sets velocityY to JUMP_VELOCITY on jump', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      // velocityY will have had one frame of gravity applied already
+      expect(player.velocityY).toBeCloseTo(JUMP_VELOCITY - GRAVITY * dt, 3);
+    });
+
+    it('cannot double jump', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      const velAfterFirstFrame = player.velocityY;
+      player.update(dt, createMockControls());
+      // Velocity should decrease due to gravity, not reset to JUMP_VELOCITY
+      expect(player.velocityY).toBeLessThan(velAfterFirstFrame);
+    });
+
+    it('gravity decreases vertical velocity over time', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      const vel1 = player.velocityY;
+      player.update(dt, createMockControls());
+      const vel2 = player.velocityY;
+      expect(vel2).toBeLessThan(vel1);
+      expect(vel1 - vel2).toBeCloseTo(GRAVITY * dt, 3);
+    });
+
+    it('player rises above terrain while jumping', () => {
+      groundPlayer();
+      const terrainY = getTerrainHeight(player.position.x, player.position.z);
+      player.setKey(' ', true);
+      for (let i = 0; i < 10; i++) player.update(dt, createMockControls());
+      expect(player.position.y).toBeGreaterThan(terrainY);
+    });
+
+    it('player lands back on terrain after jump completes', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      // Simulate enough frames for full jump arc (~0.825s at 60fps ≈ 50 frames)
+      for (let i = 0; i < 60; i++) player.update(dt, createMockControls());
+      expect(player.grounded).toBe(true);
+      expect(player.velocityY).toBe(0);
+      const terrainY = getTerrainHeight(player.position.x, player.position.z);
+      expect(player.position.y).toBeCloseTo(terrainY, 3);
+    });
+
+    it('jump peak height matches WoW physics (~1.64 yards)', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      let maxHeight = 0;
+      for (let i = 0; i < 60; i++) {
+        player.update(dt, createMockControls());
+        const heightAboveTerrain = player.position.y - getTerrainHeight(player.position.x, player.position.z);
+        if (heightAboveTerrain > maxHeight) maxHeight = heightAboveTerrain;
+      }
+      const expectedPeak = (JUMP_VELOCITY * JUMP_VELOCITY) / (2 * GRAVITY);
+      expect(maxHeight).toBeCloseTo(expectedPeak, 1);
+    });
+
+    it('jump airtime matches WoW physics (~0.825s)', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      let frames = 1;
+      while (!player.grounded && frames < 120) {
+        player.update(dt, createMockControls());
+        frames++;
+      }
+      const airtime = frames * dt;
+      const expectedAirtime = (2 * JUMP_VELOCITY) / GRAVITY;
+      expect(airtime).toBeCloseTo(expectedAirtime, 1);
+    });
+
+    it('allows horizontal movement while airborne (air control)', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      player.setKey('w', true);
+      const xBefore = player.position.x;
+      const zBefore = player.position.z;
+      player.update(dt, createMockControls());
+      const dist = Math.sqrt(
+        (player.position.x - xBefore) ** 2 +
+        (player.position.z - zBefore) ** 2
+      );
+      expect(dist).toBeGreaterThan(0);
+      expect(player.grounded).toBe(false);
+    });
+
+    it('holding space produces repeated jumps (bunny hop)', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      // Jump and land (~50 frames), then check we jumped again
+      for (let i = 0; i < 60; i++) player.update(dt, createMockControls());
+      expect(player.grounded).toBe(false); // immediately jumped again on landing
+    });
+
+    it('plays Jump animation when airborne', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      // Now airborne, next update should play Jump
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(dt, createMockControls());
+      expect(spy).toHaveBeenCalledWith('Jump');
+    });
+
+    it('plays ground animation after landing', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      // Land
+      for (let i = 0; i < 60; i++) player.update(dt, createMockControls());
+      const spy = vi.spyOn(player, 'playAnimation');
+      player.update(dt, createMockControls());
+      expect(spy).toHaveBeenCalledWith('Stand');
+    });
+
+    it('terrain snapping still works when grounded', () => {
+      player.position.x = 10;
+      player.position.z = 20;
+      player.update(dt, createMockControls());
+      expect(player.grounded).toBe(true);
+      const expected = getTerrainHeight(player.position.x, player.position.z);
+      expect(player.position.y).toBeCloseTo(expected, 5);
     });
   });
 

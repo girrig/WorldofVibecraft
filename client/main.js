@@ -214,6 +214,8 @@ function setupInput() {
       return;
     }
 
+    if (key === ' ') e.preventDefault();
+
     localPlayer.setKey(key, true);
 
     // W also cancels autorun

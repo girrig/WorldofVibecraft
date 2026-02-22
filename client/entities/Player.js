@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED } from '../../shared/constants.js';
+import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY } from '../../shared/constants.js';
 import { getTerrainHeight } from '../world/Terrain.js';
 
 const PLAYER_COLORS = [
@@ -126,13 +126,17 @@ export class LocalPlayer {
     this.playAnimation('Stand');
 
     // Movement keys
-    this.keys = { w: false, a: false, s: false, d: false, q: false, e: false };
+    this.keys = { w: false, a: false, s: false, d: false, q: false, e: false, ' ': false };
 
     // Autorun
     this.autorun = false;
 
     // Walk/Run toggle (false = run, true = walk)
     this.walkMode = false;
+
+    // Jump state
+    this.velocityY = 0;
+    this.grounded = true;
   }
 
   playAnimation(name) {
@@ -197,7 +201,9 @@ export class LocalPlayer {
     }
 
     // --- Animation state ---
-    if (!isMoving) {
+    if (!this.grounded) {
+      this.playAnimation('Jump');
+    } else if (!isMoving) {
       this.playAnimation('Stand');
     } else if (moveZ > 0) {
       this.playAnimation('WalkBackwards');
@@ -226,8 +232,27 @@ export class LocalPlayer {
       this.spineBone.quaternion.multiply(twistQuat);
     }
 
-    // Snap to terrain
-    this.position.y = getTerrainHeight(this.position.x, this.position.z);
+    // --- Vertical physics ---
+    const terrainY = getTerrainHeight(this.position.x, this.position.z);
+
+    if (this.keys[' '] && this.grounded) {
+      this.velocityY = JUMP_VELOCITY;
+      this.grounded = false;
+    }
+
+    if (!this.grounded) {
+      // Velocity-Verlet: exact for constant acceleration
+      this.position.y += this.velocityY * dt - 0.5 * GRAVITY * dt * dt;
+      this.velocityY -= GRAVITY * dt;
+
+      if (this.position.y <= terrainY) {
+        this.position.y = terrainY;
+        this.velocityY = 0;
+        this.grounded = true;
+      }
+    } else {
+      this.position.y = terrainY;
+    }
 
     // Clamp to world bounds
     const halfWorld = 250;

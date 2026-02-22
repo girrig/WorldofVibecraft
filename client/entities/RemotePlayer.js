@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createPlayerMesh, getPlayerColor } from './Player.js';
+import { getTerrainHeight } from '../world/Terrain.js';
 
 const FADE_DURATION = 0.2;
 const MOVE_THRESHOLD = 0.01; // Min distance per update to count as moving
@@ -96,7 +97,12 @@ export class RemotePlayer {
     const moveDist = Math.sqrt(dx * dx + dz * dz);
     this.prevPos.copy(this.currentPos);
 
-    if (moveDist > MOVE_THRESHOLD * dt) {
+    const terrainY = getTerrainHeight(this.currentPos.x, this.currentPos.z);
+    const airborne = this.currentPos.y > terrainY + 0.3;
+
+    if (airborne) {
+      this.playAnimation('Jump');
+    } else if (moveDist > MOVE_THRESHOLD * dt) {
       this.playAnimation('Run');
     } else {
       this.playAnimation('Stand');
