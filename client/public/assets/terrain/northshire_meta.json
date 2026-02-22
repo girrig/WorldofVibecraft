@@ -1,0 +1,44 @@
+{
+  "gridWidth": 385,
+  "gridHeight": 385,
+  "cellSize": 4.16666625,
+  "tiles": {
+    "startX": 31,
+    "startY": 47,
+    "countX": 3,
+    "countY": 3
+  },
+  "centerTile": {
+    "x": 32,
+    "y": 48
+  },
+  "centerPosition": {
+    "pos0": -8800.0,
+    "pos1": -266.666015625,
+    "pos2": 82.17825317382812
+  },
+  "positionAnalysis": {
+    "pos0_range": [
+      -9566.666015625,
+      -8000.0
+    ],
+    "pos1_range": [
+      -1033.333984375,
+      533.333984375
+    ],
+    "pos2_range": [
+      33.349822998046875,
+      387.7473449707031
+    ],
+    "height_index": 2,
+    "horiz_indices": [
+      0,
+      1
+    ]
+  },
+  "worldExtent": 1599.9999900000003,
+  "heightRange": {
+    "min": 32.500244140625,
+    "max": 396.4051818847656
+  }
+}

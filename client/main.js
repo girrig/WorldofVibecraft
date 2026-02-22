@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MSG, SPAWN_AREA } from '../shared/constants.js';
-import { createTerrain } from './world/Terrain.js';
+import { createTerrain, loadTerrain } from './world/Terrain.js';
 import { createEnvironment, createLighting, createSky } from './world/Environment.js';
 import { LocalPlayer, preloadPlayerModel } from './entities/Player.js';
 import { RemotePlayer } from './entities/RemotePlayer.js';
@@ -47,8 +47,11 @@ async function startGame() {
     // Initialize rendering
     initRenderer();
 
-    // Preload player model and connect to server in parallel
-    await preloadPlayerModel().catch((err) => console.warn('Model load failed, using fallback:', err));
+    // Preload terrain + player model in parallel
+    await Promise.all([
+      loadTerrain().catch((err) => console.warn('Terrain load failed, using fallback:', err)),
+      preloadPlayerModel().catch((err) => console.warn('Model load failed, using fallback:', err)),
+    ]);
 
     // Connect to server
     network = new NetworkClient();
@@ -80,7 +83,7 @@ function initRenderer() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;

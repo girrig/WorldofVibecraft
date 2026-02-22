@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY } from '../../shared/constants.js';
+import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY, WORLD_SIZE } from '../../shared/constants.js';
 import { getTerrainHeight } from '../world/Terrain.js';
 
 const PLAYER_COLORS = [
@@ -255,7 +255,7 @@ export class LocalPlayer {
     }
 
     // Clamp to world bounds
-    const halfWorld = 250;
+    const halfWorld = WORLD_SIZE / 2;
     this.position.x = Math.max(-halfWorld, Math.min(halfWorld, this.position.x));
     this.position.z = Math.max(-halfWorld, Math.min(halfWorld, this.position.z));
 

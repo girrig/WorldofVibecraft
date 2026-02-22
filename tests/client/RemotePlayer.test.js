@@ -30,13 +30,13 @@ describe('RemotePlayer', () => {
   let player;
 
   beforeEach(() => {
-    player = new RemotePlayer('remote1', 'RemoteGuy', { x: 10, y: 1, z: 20 });
+    player = new RemotePlayer('remote1', 'RemoteGuy', { x: 10, y: 0, z: 20 });
   });
 
   describe('constructor', () => {
     it('sets initial position from constructor argument', () => {
       expect(player.currentPos.x).toBe(10);
-      expect(player.currentPos.y).toBe(1);
+      expect(player.currentPos.y).toBe(0);
       expect(player.currentPos.z).toBe(20);
     });
 
@@ -119,12 +119,12 @@ describe('RemotePlayer', () => {
     it('plays Run when moving significantly', () => {
       const spy = vi.spyOn(player, 'playAnimation');
 
-      // Move the target far so there's clear movement
-      player.updateTarget({ x: 1000, y: 1, z: 20 }, 0);
+      // Move the target far so there's clear movement (y=0 = on terrain)
+      player.updateTarget({ x: 1000, y: 0, z: 20 }, 0);
       player.update(0.05); // First update sets prevPos
 
       spy.mockClear();
-      player.updateTarget({ x: 1000, y: 1, z: 20 }, 0);
+      player.updateTarget({ x: 1000, y: 0, z: 20 }, 0);
       player.update(0.05); // Second update detects movement delta
 
       expect(spy).toHaveBeenCalledWith('Run');

@@ -13,7 +13,7 @@ vi.mock('three/addons/utils/SkeletonUtils.js', () => ({
 }));
 
 import { LocalPlayer, getPlayerColor } from '../../client/entities/Player.js';
-import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY } from '../../shared/constants.js';
+import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY, WORLD_SIZE } from '../../shared/constants.js';
 import { getTerrainHeight } from '../../client/world/Terrain.js';
 
 // Mock controls object
@@ -298,16 +298,16 @@ describe('LocalPlayer', () => {
   });
 
   describe('update — world boundary clamping', () => {
-    it('clamps position to ±250 on X axis', () => {
-      player.position.x = 300;
+    it('clamps position to ±WORLD_SIZE/2 on X axis', () => {
+      player.position.x = WORLD_SIZE;
       player.update(dt, createMockControls());
-      expect(player.position.x).toBeLessThanOrEqual(250);
+      expect(player.position.x).toBeLessThanOrEqual(WORLD_SIZE / 2);
     });
 
-    it('clamps position to ±250 on Z axis', () => {
-      player.position.z = -300;
+    it('clamps position to ±WORLD_SIZE/2 on Z axis', () => {
+      player.position.z = -WORLD_SIZE;
       player.update(dt, createMockControls());
-      expect(player.position.z).toBeGreaterThanOrEqual(-250);
+      expect(player.position.z).toBeGreaterThanOrEqual(-WORLD_SIZE / 2);
     });
   });
 
@@ -316,11 +316,8 @@ describe('LocalPlayer', () => {
       player.position.x = 10;
       player.position.z = 20;
       player.update(dt, createMockControls());
-      // getTerrainHeight formula at (10, 20)
-      const expected =
-        Math.sin(10 * 0.02) * 1.5 +
-        Math.cos(20 * 0.02) * 1.5 +
-        Math.sin(10 * 0.05 + 20 * 0.03) * 0.8;
+      // Without loaded terrain data, getTerrainHeight returns 0
+      const expected = getTerrainHeight(player.position.x, player.position.z);
       expect(player.position.y).toBeCloseTo(expected, 5);
     });
   });

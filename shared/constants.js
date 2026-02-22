@@ -1,7 +1,7 @@
 export const TICK_RATE = 20; // Server ticks per second
 export const TICK_INTERVAL = 1000 / TICK_RATE;
 
-export const WORLD_SIZE = 500; // World extends from -250 to +250
+export const WORLD_SIZE = 1600; // 3x3 ADT tiles, ~1600 yards per side
 export const SPAWN_AREA = 20; // Players spawn within this radius of origin
 
 // Movement (WoW-style)
