@@ -175,9 +175,19 @@ def parse_wdt(data):
 # ── ADT Parser ────────────────────────────────────────────────────────────
 
 def parse_adt(data):
-    """Parse ADT file. Return (mtex_list, mcnk_list)."""
+    """Parse ADT file. Return (mtex_list, mcnk_list, doodad_info, wmo_info)."""
     mtex_list = []
     mcnk_list = []
+
+    # Doodad-related chunks
+    mmdx_data = None    # raw concatenated null-terminated M2 filenames
+    mmid_offsets = []   # u32 offsets into mmdx_data
+    mddf_entries = []   # parsed MDDF placement records
+
+    # WMO-related chunks
+    mwmo_data = None    # raw concatenated null-terminated WMO filenames
+    mwid_offsets = []   # u32 offsets into mwmo_data
+    modf_entries = []   # parsed MODF placement records
 
     for magic, data_ofs, size in scan_chunks(data):
         if magic == b"MTEX":
@@ -191,7 +201,86 @@ def parse_adt(data):
             if mcnk:
                 mcnk_list.append(mcnk)
 
-    return mtex_list, mcnk_list
+        # -- Doodad chunks --
+        elif magic == b"MMDX":
+            mmdx_data = data[data_ofs:data_ofs + size]
+
+        elif magic == b"MMID":
+            count = size // 4
+            mmid_offsets = list(struct.unpack_from(f"<{count}I", data, data_ofs))
+
+        elif magic == b"MDDF":
+            entry_size = 36
+            count = size // entry_size
+            for i in range(count):
+                ofs = data_ofs + i * entry_size
+                name_id, unique_id = struct.unpack_from("<II", data, ofs)
+                pos = struct.unpack_from("<3f", data, ofs + 8)
+                rot = struct.unpack_from("<3f", data, ofs + 20)
+                scale, flags = struct.unpack_from("<HH", data, ofs + 32)
+                mddf_entries.append({
+                    "nameId": name_id,
+                    "uniqueId": unique_id,
+                    "position": pos,
+                    "rotation": rot,
+                    "scale": scale,
+                    "flags": flags,
+                })
+
+        # -- WMO chunks --
+        elif magic == b"MWMO":
+            mwmo_data = data[data_ofs:data_ofs + size]
+
+        elif magic == b"MWID":
+            count = size // 4
+            mwid_offsets = list(struct.unpack_from(f"<{count}I", data, data_ofs))
+
+        elif magic == b"MODF":
+            entry_size = 64
+            count = size // entry_size
+            for i in range(count):
+                ofs = data_ofs + i * entry_size
+                name_id, unique_id = struct.unpack_from("<II", data, ofs)
+                pos = struct.unpack_from("<3f", data, ofs + 8)
+                rot = struct.unpack_from("<3f", data, ofs + 20)
+                ext_lo = struct.unpack_from("<3f", data, ofs + 32)
+                ext_hi = struct.unpack_from("<3f", data, ofs + 44)
+                flags, doodad_set, name_set, scale = struct.unpack_from(
+                    "<HHHH", data, ofs + 56
+                )
+                modf_entries.append({
+                    "nameId": name_id,
+                    "uniqueId": unique_id,
+                    "position": pos,
+                    "rotation": rot,
+                    "extentsLo": ext_lo,
+                    "extentsHi": ext_hi,
+                    "flags": flags,
+                    "doodadSet": doodad_set,
+                    "nameSet": name_set,
+                    "scale": scale,
+                })
+
+    # Resolve model filenames
+    def resolve_name(name_data, id_offsets, name_id):
+        if name_data is None or name_id >= len(id_offsets):
+            return "unknown"
+        offset = id_offsets[name_id]
+        end = name_data.find(b"\x00", offset)
+        if end < 0:
+            end = len(name_data)
+        return name_data[offset:end].decode("ascii", errors="replace")
+
+    for entry in mddf_entries:
+        entry["modelPath"] = resolve_name(mmdx_data, mmid_offsets, entry["nameId"])
+
+    for entry in modf_entries:
+        entry["modelPath"] = resolve_name(mwmo_data, mwid_offsets, entry["nameId"])
+
+    doodad_info = {"entries": mddf_entries, "count": len(mddf_entries)}
+    wmo_info = {"entries": modf_entries, "count": len(modf_entries)}
+
+    return mtex_list, mcnk_list, doodad_info, wmo_info
 
 
 def parse_mcnk(data, data_ofs, size):
@@ -442,7 +531,7 @@ def build_heightmap_grid(all_tile_data, start_tx, start_ty, num_tx, num_ty):
     # Track position data for coordinate mapping
     all_positions = []
 
-    for (tx, ty), (mtex_list, mcnk_list) in all_tile_data.items():
+    for (tx, ty), (mtex_list, mcnk_list, _, _) in all_tile_data.items():
         tile_col = tx - start_tx  # 0-based tile column
         tile_row = ty - start_ty  # 0-based tile row
 
@@ -551,6 +640,119 @@ def analyze_positions(positions):
     return info
 
 
+# ── Doodad/WMO Placement JSON ────────────────────────────────────────────
+
+MAP_OFFSET = 17066.666666666666  # 32 * 533.33333
+
+
+def classify_doodad(model_path):
+    """Classify a doodad model path into a visual category."""
+    path = model_path.lower()
+    if any(kw in path for kw in ("tree", "bush", "fern", "shrub", "plant",
+                                  "flower", "vine", "ivy", "grass", "weed",
+                                  "canopy", "leaves")):
+        return "vegetation"
+    if any(kw in path for kw in ("rock", "stone", "boulder", "cliff")):
+        return "rock"
+    if any(kw in path for kw in ("fence", "post", "sign", "lamp", "torch",
+                                  "banner", "flag", "lantern", "brazier")):
+        return "prop"
+    if any(kw in path for kw in ("barrel", "crate", "box", "chest",
+                                  "wagon", "cart", "sack", "bag")):
+        return "container"
+    return "misc"
+
+
+def build_doodad_json(all_tile_data, center_pos, center_height):
+    """
+    Collect all MDDF/MODF entries, convert to Three.js coordinates, write JSON.
+
+    MDDF/MODF coordinate system (ADT global):
+      pos[0] -> wowY via (MAP_OFFSET - pos[0])   (east-west)
+      pos[1] -> height                             (vertical, Y-up)
+      pos[2] -> wowX via (MAP_OFFSET - pos[2])   (north-south)
+
+    Then WoW -> Three.js:
+      threeX = centerWowY - wowY = center_pos[1] - MAP_OFFSET + pos[0]
+      threeZ = centerWowX - wowX = center_pos[0] - MAP_OFFSET + pos[2]
+      threeY = pos[1] - centerHeight
+    """
+    # Precompute offsets for fast conversion
+    ofs_x = center_pos[1] - MAP_OFFSET  # centerWowY - MAP_OFFSET
+    ofs_z = center_pos[0] - MAP_OFFSET  # centerWowX - MAP_OFFSET
+
+    doodads = []
+    wmos = []
+    seen_ids = set()
+
+    for (tx, ty), (_, _, doodad_info, wmo_info) in all_tile_data.items():
+        for entry in doodad_info["entries"]:
+            uid = entry["uniqueId"]
+            if uid in seen_ids:
+                continue
+            seen_ids.add(uid)
+
+            p = entry["position"]
+            three_x = ofs_x + p[0]
+            three_z = ofs_z + p[2]
+            three_y = p[1] - center_height
+
+            scale = entry["scale"] / 1024.0
+            model = entry["modelPath"].lower().replace("\\", "/")
+
+            doodads.append({
+                "id": uid,
+                "model": model,
+                "x": round(three_x, 2),
+                "y": round(three_y, 2),
+                "z": round(three_z, 2),
+                "rotY": round(entry["rotation"][1], 2),
+                "scale": round(scale, 3),
+                "type": classify_doodad(model),
+            })
+
+        for entry in wmo_info["entries"]:
+            uid = entry["uniqueId"]
+            if uid in seen_ids:
+                continue
+            seen_ids.add(uid)
+
+            p = entry["position"]
+            three_x = ofs_x + p[0]
+            three_z = ofs_z + p[2]
+            three_y = p[1] - center_height
+
+            # Bounding box size from extents
+            lo = entry["extentsLo"]
+            hi = entry["extentsHi"]
+            size_x = abs(hi[0] - lo[0])  # east-west -> threeX
+            size_y = abs(hi[1] - lo[1])  # height -> threeY
+            size_z = abs(hi[2] - lo[2])  # north-south -> threeZ
+
+            scale = entry["scale"] / 1024.0 if entry["scale"] > 0 else 1.0
+            model = entry["modelPath"].lower().replace("\\", "/")
+
+            wmos.append({
+                "id": uid,
+                "model": model,
+                "x": round(three_x, 2),
+                "y": round(three_y, 2),
+                "z": round(three_z, 2),
+                "rotY": round(entry["rotation"][1], 2),
+                "scale": round(scale, 3),
+                "sizeX": round(size_x, 2),
+                "sizeY": round(size_y, 2),
+                "sizeZ": round(size_z, 2),
+            })
+
+    return {
+        "doodads": doodads,
+        "wmos": wmos,
+        "totalDoodads": len(doodads),
+        "totalWmos": len(wmos),
+    }
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -611,7 +813,7 @@ def main():
         sys.exit(1)
 
     # ── Step 3: Extract all ADT tiles ──
-    all_tile_data = {}  # (tx, ty) -> (mtex_list, mcnk_list)
+    all_tile_data = {}  # (tx, ty) -> (mtex_list, mcnk_list, doodad_info, wmo_info)
 
     for tx, ty in tiles_to_extract:
         adt_path = f"World\\Maps\\Azeroth\\Azeroth_{tx}_{ty}.adt"
@@ -622,9 +824,10 @@ def main():
             continue
 
         print(f"  File size: {len(adt_data)} bytes")
-        mtex_list, mcnk_list = parse_adt(adt_data)
+        mtex_list, mcnk_list, doodad_info, wmo_info = parse_adt(adt_data)
         print(f"  Textures: {len(mtex_list)}")
         print(f"  Chunks: {len(mcnk_list)}")
+        print(f"  Doodads: {doodad_info['count']}, WMOs: {wmo_info['count']}")
 
         if mcnk_list:
             # Print some debug info
@@ -641,7 +844,20 @@ def main():
                 if mtex_list:
                     print(f"  First textures: {mtex_list[:5]}")
 
-        all_tile_data[(tx, ty)] = (mtex_list, mcnk_list)
+        # Print sample doodad positions for coordinate verification
+        if doodad_info["count"] > 0:
+            for entry in doodad_info["entries"][:3]:
+                p = entry["position"]
+                print(f"    Doodad: {entry['modelPath'][:60]}")
+                print(f"      pos=({p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f}), scale={entry['scale']/1024:.2f}")
+
+        if wmo_info["count"] > 0:
+            for entry in wmo_info["entries"][:2]:
+                p = entry["position"]
+                print(f"    WMO: {entry['modelPath'][:60]}")
+                print(f"      pos=({p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f})")
+
+        all_tile_data[(tx, ty)] = (mtex_list, mcnk_list, doodad_info, wmo_info)
 
     # ── Step 4: Build heightmap grid ──
     print(f"\n== Building heightmap grid ==")
@@ -656,14 +872,14 @@ def main():
     center_chunks = []
     center_key = (cx, cy)
     if center_key in all_tile_data:
-        _, chunks = all_tile_data[center_key]
+        _, chunks, _, _ = all_tile_data[center_key]
         for c in chunks:
             if c["indexX"] == 8 and c["indexY"] == 8:
                 center_chunks.append(c)
     if not center_chunks:
         # Fallback: use first chunk of center tile
         if center_key in all_tile_data:
-            _, chunks = all_tile_data[center_key]
+            _, chunks, _, _ = all_tile_data[center_key]
             if chunks:
                 center_chunks.append(chunks[0])
 
@@ -718,7 +934,7 @@ def main():
                 continue
 
             print(f"  Baking texture for tile ({tx}, {ty})...")
-            mtex_list, mcnk_list = all_tile_data[(tx, ty)]
+            mtex_list, mcnk_list, _, _ = all_tile_data[(tx, ty)]
 
             # Organize chunks into 16x16 grid
             chunks_grid = [[None] * 16 for _ in range(16)]
@@ -737,10 +953,34 @@ def main():
             print(f"    -> {tex_path} ({tile_img.size[0]}x{tile_img.size[1]})")
             tex_idx += 1
 
+    # ── Step 8: Build and write doodad/WMO placement JSON ──
+    print(f"\n== Building doodad placement data ==")
+    center_h = float(grid[grid.shape[0] // 2, grid.shape[1] // 2])
+    doodad_json = build_doodad_json(all_tile_data, center_pos, center_h)
+
+    doodad_path = output_dir / "northshire_doodads.json"
+    with open(doodad_path, "w") as f:
+        json.dump(doodad_json, f, indent=2)
+    print(f"  Doodads: {doodad_json['totalDoodads']} (deduplicated)")
+    print(f"  WMOs: {doodad_json['totalWmos']} (deduplicated)")
+    print(f"  Output: {doodad_path}")
+
+    # Print a few samples for verification
+    if doodad_json["doodads"]:
+        print(f"  Sample doodads:")
+        for d in doodad_json["doodads"][:5]:
+            print(f"    [{d['type']}] {d['model'][:50]} @ ({d['x']:.0f}, {d['y']:.0f}, {d['z']:.0f})")
+    if doodad_json["wmos"]:
+        print(f"  Sample WMOs:")
+        for w in doodad_json["wmos"][:5]:
+            print(f"    {w['model'][:50]} @ ({w['x']:.0f}, {w['y']:.0f}, {w['z']:.0f}) "
+                  f"size=({w['sizeX']:.0f}, {w['sizeY']:.0f}, {w['sizeZ']:.0f})")
+
     print(f"\n== Done! ==")
     print(f"  {len(tiles_to_extract)} tiles extracted")
     print(f"  Heightmap: {grid.shape[1]}x{grid.shape[0]} ({cell_size:.2f} yards/cell)")
     print(f"  Height range: {grid.min():.1f} to {grid.max():.1f}")
+    print(f"  Doodads: {doodad_json['totalDoodads']}, WMOs: {doodad_json['totalWmos']}")
     print(f"  Output directory: {output_dir}")
 
 

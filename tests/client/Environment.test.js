@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('three', () => import('../__mocks__/three.js'));
+vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
+  GLTFLoader: class { load() {} },
+}));
 
-import { createEnvironment, createLighting, createSky } from '../../client/world/Environment.js';
+import { createEnvironment, loadEnvironment, createLighting, createSky } from '../../client/world/Environment.js';
 import { Scene } from '../__mocks__/three.js';
 
 describe('createEnvironment', () => {
@@ -12,9 +15,15 @@ describe('createEnvironment', () => {
     expect(env.children).toBeDefined();
   });
 
-  it('returns an empty group (decorations removed for real terrain)', () => {
+  it('returns an empty group when no data loaded', () => {
     const env = createEnvironment();
     expect(env.children.length).toBe(0);
+  });
+});
+
+describe('loadEnvironment', () => {
+  it('is an async function', () => {
+    expect(typeof loadEnvironment).toBe('function');
   });
 });
 

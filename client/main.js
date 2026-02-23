@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { MSG, SPAWN_AREA } from '../shared/constants.js';
+import { MSG, SPAWN_AREA, SPAWN_POINT } from '../shared/constants.js';
 import { createTerrain, loadTerrain } from './world/Terrain.js';
-import { createEnvironment, createLighting, createSky } from './world/Environment.js';
+import { createEnvironment, loadEnvironment, createLighting, createSky } from './world/Environment.js';
 import { LocalPlayer, preloadPlayerModel } from './entities/Player.js';
 import { RemotePlayer } from './entities/RemotePlayer.js';
 import { PlayerControls } from './controls/PlayerControls.js';
@@ -47,9 +47,10 @@ async function startGame() {
     // Initialize rendering
     initRenderer();
 
-    // Preload terrain + player model in parallel
+    // Preload terrain + environment + player model in parallel
     await Promise.all([
       loadTerrain().catch((err) => console.warn('Terrain load failed, using fallback:', err)),
+      loadEnvironment().catch((err) => console.warn('Doodad load failed, skipping:', err)),
       preloadPlayerModel().catch((err) => console.warn('Model load failed, using fallback:', err)),
     ]);
 
@@ -104,10 +105,14 @@ function initGame(welcomeData, name) {
   // Local player
   localPlayer = new LocalPlayer(welcomeData.id, name);
 
-  // Random spawn position near origin
+  // Spawn near Northshire Abbey (WoW human start location)
   const angle = Math.random() * Math.PI * 2;
   const dist = Math.random() * SPAWN_AREA;
-  localPlayer.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+  localPlayer.position.set(
+    SPAWN_POINT.x + Math.cos(angle) * dist,
+    0,
+    SPAWN_POINT.z + Math.sin(angle) * dist
+  );
 
   scene.add(localPlayer.mesh);
 

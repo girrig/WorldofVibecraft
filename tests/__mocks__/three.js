@@ -166,6 +166,16 @@ export class SphereGeometry { constructor() {} dispose() {} }
 export class BoxGeometry { constructor() {} dispose() {} }
 export class ConeGeometry { constructor() {} dispose() {} }
 export class DodecahedronGeometry { constructor() {} dispose() {} }
+export class BufferGeometry {
+  constructor() { this.attributes = {}; }
+  setAttribute() { return this; }
+  setIndex() { return this; }
+  computeVertexNormals() {}
+  dispose() {}
+}
+export class BufferAttribute {
+  constructor(array, itemSize) { this.array = array; this.itemSize = itemSize; }
+}
 
 // Material stubs
 export class MeshStandardMaterial {
@@ -190,6 +200,21 @@ export class Sprite {
     this.scale = new Vector3(1, 1, 1);
     this.parent = null;
   }
+}
+
+// Instanced mesh
+export class InstancedMesh {
+  constructor(geometry, material, count) {
+    this.geometry = geometry;
+    this.material = material;
+    this.count = count;
+    this.instanceMatrix = { needsUpdate: false };
+    this.castShadow = false;
+    this.receiveShadow = false;
+    this.isMesh = true;
+    this.parent = null;
+  }
+  setMatrixAt(index, matrix) {}
 }
 
 // Lights
@@ -229,3 +254,18 @@ export class Color {
   constructor(c) { this.value = c; }
   set(c) { this.value = c; return this; }
 }
+
+// MathUtils
+export const MathUtils = {
+  degToRad(deg) { return deg * Math.PI / 180; },
+  radToDeg(rad) { return rad * 180 / Math.PI; },
+};
+
+// Texture stubs
+export class TextureLoader {
+  load(url) { return { wrapS: 0, wrapT: 0, minFilter: 0, colorSpace: '' }; }
+}
+export const ClampToEdgeWrapping = 1001;
+export const LinearMipmapLinearFilter = 1008;
+export const SRGBColorSpace = 'srgb';
+export const PCFSoftShadowMap = 2;

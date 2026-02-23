@@ -27,6 +27,8 @@ MPQ_LOAD_ORDER = [
     "common-2.MPQ",
     "expansion.MPQ",
     "lichking.MPQ",
+    "enUS/locale-enUS.MPQ",
+    "enUS/patch-enUS.MPQ",
     "patch.MPQ",
     "patch-2.MPQ",
     "patch-3.MPQ",
