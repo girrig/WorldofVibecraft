@@ -1,58 +1,427 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('three', () => import('../__mocks__/three.js'));
-vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
-  GLTFLoader: class { load() {} },
+
+const { mockGLTFLoad } = vi.hoisted(() => ({
+  mockGLTFLoad: vi.fn(),
 }));
 
-import { createEnvironment, loadEnvironment, createLighting, createSky } from '../../client/world/Environment.js';
-import { Scene } from '../__mocks__/three.js';
+vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
+  GLTFLoader: class {
+    load(...args) { mockGLTFLoad(...args); }
+  },
+}));
 
-describe('createEnvironment', () => {
-  it('returns a group', () => {
-    const env = createEnvironment();
-    expect(env).toBeDefined();
-    expect(env.children).toBeDefined();
+vi.mock('../../client/world/Terrain.js', () => ({
+  getTerrainHeight: () => 5.0,
+}));
+
+import {
+  Scene, Group, Mesh, BoxGeometry, MeshStandardMaterial,
+} from '../__mocks__/three.js';
+
+// ── Helpers ──
+
+function makeMockScene(meshCount = 1) {
+  const scene = new Group();
+  for (let i = 0; i < meshCount; i++) {
+    scene.add(new Mesh(new BoxGeometry(), new MeshStandardMaterial()));
+  }
+  return scene;
+}
+
+async function flushAsync() {
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 0));
+  }
+}
+
+const DOODAD_PAYLOAD = {
+  doodads: [
+    { model: 'trees/oak.m2', x: 10, z: 20, rotY: 45, scale: 1.0, type: 'vegetation' },
+    { model: 'trees/oak.m2', x: 30, z: 40, rotY: 90, scale: 0.8, type: 'vegetation' },
+    { model: 'rocks/boulder.m2', x: -5, z: 15, rotY: 0, scale: 1.5, type: 'rock' },
+  ],
+  wmos: [
+    { model: 'buildings/abbey.wmo', x: 0, z: 0, rotY: 0, scale: 1.0, sizeX: 20, sizeY: 10, sizeZ: 20 },
+  ],
+};
+
+const MANIFEST_PAYLOAD = {
+  models: {
+    'trees/oak.m2': { glb: 'doodads/oak.glb' },
+  },
+  wmos: {
+    'buildings/abbey.wmo': { glb: 'wmos/abbey.glb' },
+  },
+};
+
+function mockFetchWith(doodads, manifest) {
+  global.fetch = vi.fn((url) => {
+    if (url.includes('northshire_doodads.json')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(doodads) });
+    }
+    if (url.includes('doodad_manifest.json')) {
+      if (manifest) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(manifest) });
+      }
+      return Promise.resolve({ ok: false });
+    }
+    return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+  });
+}
+
+// ── Tests using fresh module state ──
+
+describe('Environment', () => {
+  let mod;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockGLTFLoad.mockReset();
+    mockGLTFLoad.mockImplementation((url, onSuccess) => {
+      onSuccess({ scene: makeMockScene(1) });
+    });
+    mod = await import('../../client/world/Environment.js');
   });
 
-  it('returns an empty group when no data loaded', () => {
-    const env = createEnvironment();
-    expect(env.children.length).toBe(0);
-  });
-});
+  // ── No-data tests ──
 
-describe('loadEnvironment', () => {
-  it('is an async function', () => {
-    expect(typeof loadEnvironment).toBe('function');
-  });
-});
+  describe('createEnvironment (no data)', () => {
+    it('returns a group', () => {
+      const env = mod.createEnvironment();
+      expect(env).toBeDefined();
+      expect(env.children).toBeDefined();
+    });
 
-describe('createLighting', () => {
-  it('adds lights to the scene', () => {
-    const scene = new Scene();
-    createLighting(scene);
-    // ambient + sun + hemisphere = 3
-    expect(scene.children.length).toBe(3);
+    it('returns an empty group when no data loaded', () => {
+      const env = mod.createEnvironment();
+      expect(env.children.length).toBe(0);
+    });
   });
 
-  it('creates a shadow-casting directional light', () => {
-    const scene = new Scene();
-    createLighting(scene);
-    const sun = scene.children.find(c => c.castShadow);
-    expect(sun).toBeDefined();
-  });
-});
+  describe('loadEnvironment', () => {
+    it('is an async function', () => {
+      expect(typeof mod.loadEnvironment).toBe('function');
+    });
 
-describe('createSky', () => {
-  it('sets scene background color', () => {
-    const scene = new Scene();
-    createSky(scene);
-    expect(scene.background).toBeDefined();
+    it('fetches doodad data and manifest', async () => {
+      mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD);
+      await mod.loadEnvironment();
+      expect(global.fetch).toHaveBeenCalledWith('/assets/terrain/northshire_doodads.json');
+      expect(global.fetch).toHaveBeenCalledWith('/assets/models/doodad_manifest.json');
+    });
+
+    it('handles manifest fetch failure gracefully', async () => {
+      global.fetch = vi.fn((url) => {
+        if (url.includes('northshire_doodads.json')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(DOODAD_PAYLOAD) });
+        }
+        return Promise.reject(new Error('Network error'));
+      });
+
+      await mod.loadEnvironment();
+      const group = mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBeGreaterThan(0);
+    });
+
+    it('handles non-ok manifest response', async () => {
+      mockFetchWith(DOODAD_PAYLOAD, null);
+      await mod.loadEnvironment();
+      const group = mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBeGreaterThan(0);
+    });
   });
 
-  it('sets scene fog', () => {
-    const scene = new Scene();
-    createSky(scene);
-    expect(scene.fog).toBeDefined();
+  // ── Populated environment tests ──
+
+  describe('createEnvironment (with data)', () => {
+    beforeEach(async () => {
+      mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD);
+      await mod.loadEnvironment();
+    });
+
+    it('returns group immediately (sync)', () => {
+      const group = mod.createEnvironment();
+      expect(group).toBeDefined();
+      expect(group.children).toBeDefined();
+    });
+
+    it('populates group asynchronously', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBeGreaterThan(0);
+    });
+
+    it('loads GLB for models in manifest', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      const urls = mockGLTFLoad.mock.calls.map(c => c[0]);
+      expect(urls).toContain('/assets/models/doodads/oak.glb');
+      expect(urls).toContain('/assets/models/wmos/abbey.glb');
+    });
+
+    it('creates InstancedMesh with correct instance count', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // oak has 2 instances in manifest → InstancedMesh with count=2
+      const oakMesh = group.children.find(c => c.count === 2);
+      expect(oakMesh).toBeDefined();
+      expect(oakMesh.castShadow).toBe(true);
+      expect(oakMesh.receiveShadow).toBe(true);
+    });
+
+    it('creates one InstancedMesh per mesh part for multi-mesh GLBs', async () => {
+      mockGLTFLoad.mockImplementation((url, onSuccess) => {
+        if (url.includes('oak.glb')) {
+          onSuccess({ scene: makeMockScene(2) });
+        } else {
+          onSuccess({ scene: makeMockScene(1) });
+        }
+      });
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // oak → 2 mesh parts, each with count=2
+      const oakMeshes = group.children.filter(c => c.count === 2);
+      expect(oakMeshes.length).toBe(2);
+    });
+
+    it('sets instanceMatrix.needsUpdate after populating', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      const instanced = group.children.find(c => c.count === 2);
+      expect(instanced).toBeDefined();
+      expect(instanced.instanceMatrix.needsUpdate).toBe(true);
+    });
+
+    it('writes position data into instance matrices', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      const instanced = group.children.find(c => c.count === 2);
+      expect(instanced).toBeDefined();
+      const hasData = instanced.instanceMatrix.array.some(v => v !== 0);
+      expect(hasData).toBe(true);
+    });
+
+    it('uses fallback placeholder when model not in manifest', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // boulder.m2 not in manifest → fallback InstancedMesh with count=1
+      const boulderMesh = group.children.find(c => c.count === 1 && c.isMesh);
+      expect(boulderMesh).toBeDefined();
+    });
+
+    it('uses fallback when GLB load fails', async () => {
+      mockGLTFLoad.mockImplementation((url, onSuccess, onProgress, onError) => {
+        onError(new Error('Load failed'));
+      });
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // All models should fall back to placeholders
+      expect(group.children.length).toBeGreaterThan(0);
+      // No GLB loaded → GLTFLoader.load should NOT have been called for boulder
+      // (it's not in manifest), only for oak and abbey
+    });
+
+    it('places WMO from manifest as cloned scene', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // WMO clone is a Group (not InstancedMesh)
+      const wmoChild = group.children.find(
+        c => c.children !== undefined && c.count === undefined
+      );
+      expect(wmoChild).toBeDefined();
+    });
+
+    it('sets shadow on WMO mesh children', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      const wmoChild = group.children.find(
+        c => c.children !== undefined && c.count === undefined
+      );
+      expect(wmoChild).toBeDefined();
+      // The cloned WMO group should have a Mesh child with castShadow set
+      const meshChild = wmoChild.children.find(c => c.isMesh);
+      if (meshChild) {
+        expect(meshChild.castShadow).toBe(true);
+        expect(meshChild.receiveShadow).toBe(true);
+      }
+    });
+
+    it('falls back to box for WMO when GLB fails', async () => {
+      mockGLTFLoad.mockImplementation((url, onSuccess, onProgress, onError) => {
+        if (url.includes('abbey.glb')) {
+          onError(new Error('WMO load failed'));
+        } else {
+          onSuccess({ scene: makeMockScene(1) });
+        }
+      });
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // WMO fallback is a Mesh (box), not a Group clone
+      const wmoFallback = group.children.find(
+        c => c.isMesh && c.count === undefined
+      );
+      expect(wmoFallback).toBeDefined();
+    });
+  });
+
+  // ── Bounds checking ──
+
+  describe('bounds checking', () => {
+    it('skips out-of-bounds doodads', async () => {
+      const data = {
+        doodads: [
+          { model: 'trees/far.m2', x: 900, z: 0, type: 'vegetation' },
+          { model: 'trees/near.m2', x: 10, z: 20, type: 'vegetation' },
+        ],
+        wmos: [],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // Only near doodad → 1 InstancedMesh
+      expect(group.children.length).toBe(1);
+    });
+
+    it('skips out-of-bounds WMOs', async () => {
+      const data = {
+        doodads: [],
+        wmos: [
+          { model: 'buildings/far.wmo', x: 900, z: 0, sizeX: 10, sizeY: 8, sizeZ: 10 },
+        ],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBe(0);
+    });
+
+    it('skips oversized WMOs', async () => {
+      const data = {
+        doodads: [],
+        wmos: [
+          { model: 'buildings/huge.wmo', x: 0, z: 0, sizeX: 2000, sizeY: 8, sizeZ: 10 },
+        ],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBe(0);
+    });
+  });
+
+  // ── Fallback types ──
+
+  describe('fallback placeholders', () => {
+    beforeEach(async () => {
+      const data = {
+        doodads: [
+          { model: 'a.m2', x: 0, z: 0, type: 'vegetation' },
+          { model: 'b.m2', x: 5, z: 5, type: 'rock' },
+          { model: 'c.m2', x: 10, z: 10, type: 'prop' },
+          { model: 'd.m2', x: 15, z: 15, type: 'container' },
+          { model: 'e.m2', x: 20, z: 20, type: 'unknown_type' },
+        ],
+        wmos: [],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+    });
+
+    it('creates one InstancedMesh per unique model', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+      // 5 unique models, each with 1 instance → 5 InstancedMeshes
+      expect(group.children.length).toBe(5);
+    });
+
+    it('all fallback meshes cast and receive shadows', async () => {
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      for (const child of group.children) {
+        expect(child.castShadow).toBe(true);
+        expect(child.receiveShadow).toBe(true);
+      }
+    });
+  });
+
+  // ── Lighting ──
+
+  describe('createLighting', () => {
+    it('adds 3 lights to the scene', () => {
+      const scene = new Scene();
+      mod.createLighting(scene);
+      expect(scene.children.length).toBe(3);
+    });
+
+    it('creates a shadow-casting directional light', () => {
+      const scene = new Scene();
+      mod.createLighting(scene);
+      const sun = scene.children.find(c => c.castShadow);
+      expect(sun).toBeDefined();
+    });
+
+    it('configures 2048x2048 shadow map', () => {
+      const scene = new Scene();
+      mod.createLighting(scene);
+      const sun = scene.children.find(c => c.castShadow);
+      expect(sun.shadow.mapSize.width).toBe(2048);
+      expect(sun.shadow.mapSize.height).toBe(2048);
+    });
+
+    it('configures shadow camera for large world', () => {
+      const scene = new Scene();
+      mod.createLighting(scene);
+      const sun = scene.children.find(c => c.castShadow);
+      expect(sun.shadow.camera.far).toBe(600);
+      expect(sun.shadow.camera.left).toBe(-200);
+      expect(sun.shadow.camera.right).toBe(200);
+    });
+  });
+
+  // ── Sky ──
+
+  describe('createSky', () => {
+    it('sets scene background color', () => {
+      const scene = new Scene();
+      mod.createSky(scene);
+      expect(scene.background).toBeDefined();
+    });
+
+    it('sets scene fog', () => {
+      const scene = new Scene();
+      mod.createSky(scene);
+      expect(scene.fog).toBeDefined();
+    });
+
+    it('uses FogExp2 with correct density', () => {
+      const scene = new Scene();
+      mod.createSky(scene);
+      expect(scene.fog.density).toBe(0.0012);
+    });
   });
 });

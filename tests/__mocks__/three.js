@@ -36,6 +36,18 @@ export class Vector3 {
     }
     return this;
   }
+  setScalar(s) { this.x = s; this.y = s; this.z = s; return this; }
+}
+
+function makeMatrix16() {
+  const elements = new Float32Array(16);
+  elements[0] = elements[5] = elements[10] = elements[15] = 1;
+  return {
+    elements,
+    toArray(target, offset = 0) {
+      for (let i = 0; i < 16; i++) target[offset + i] = elements[i];
+    },
+  };
 }
 
 function makeEuler() {
@@ -46,12 +58,33 @@ export class Group {
   constructor() {
     this.position = new Vector3();
     this.rotation = makeEuler();
+    this.scale = new Vector3(1, 1, 1);
+    this.matrix = makeMatrix16();
     this.children = [];
     this.parent = null;
   }
   add(child) {
     child.parent = this;
     this.children.push(child);
+  }
+  updateMatrix() {
+    const e = this.matrix.elements;
+    e.fill(0);
+    e[0] = this.scale.x; e[5] = this.scale.y; e[10] = this.scale.z;
+    e[12] = this.position.x; e[13] = this.position.y; e[14] = this.position.z;
+    e[15] = 1;
+  }
+  clone() {
+    const cloned = new Group();
+    cloned.position.copy(this.position);
+    cloned.rotation.x = this.rotation.x;
+    cloned.rotation.y = this.rotation.y;
+    cloned.rotation.z = this.rotation.z;
+    cloned.scale.copy(this.scale);
+    for (const child of this.children) {
+      if (child.clone) cloned.add(child.clone());
+    }
+    return cloned;
   }
   traverse(fn) {
     fn(this);
@@ -208,7 +241,10 @@ export class InstancedMesh {
     this.geometry = geometry;
     this.material = material;
     this.count = count;
-    this.instanceMatrix = { needsUpdate: false };
+    this.instanceMatrix = {
+      array: new Float32Array(count * 16),
+      needsUpdate: false,
+    };
     this.castShadow = false;
     this.receiveShadow = false;
     this.isMesh = true;
