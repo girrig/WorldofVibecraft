@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createPlayerMesh, getPlayerColor } from './Player.js';
+import { createPlayerMesh, getPlayerColor } from './PlayerModel.js';
 import { getTerrainHeight } from '../world/Terrain.js';
 
 const FADE_DURATION = 0.2;

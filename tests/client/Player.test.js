@@ -12,7 +12,8 @@ vi.mock('three/addons/utils/SkeletonUtils.js', () => ({
   },
 }));
 
-import { LocalPlayer, getPlayerColor } from '../../client/entities/Player.js';
+import { LocalPlayer } from '../../client/entities/Player.js';
+import { getPlayerColor } from '../../client/entities/PlayerModel.js';
 import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY, WORLD_SIZE } from '../../shared/constants.js';
 import { getTerrainHeight } from '../../client/world/Terrain.js';
 

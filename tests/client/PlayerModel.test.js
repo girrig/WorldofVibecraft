@@ -49,7 +49,7 @@ describe('Model loading pipeline', () => {
   describe('preloadPlayerModel', () => {
     it('calls GLTFLoader.load with the correct model path', async () => {
       mockLoadFn.mockImplementation(() => {});
-      const { preloadPlayerModel } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
       preloadPlayerModel();
 
       expect(mockLoadFn).toHaveBeenCalledTimes(1);
@@ -61,7 +61,7 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations: [] });
       });
-      const { preloadPlayerModel } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
 
       const result = await preloadPlayerModel();
       expect(result).toBe(scene);
@@ -69,7 +69,7 @@ describe('Model loading pipeline', () => {
 
     it('returns the same promise on repeated calls (caching)', async () => {
       mockLoadFn.mockImplementation(() => {});
-      const { preloadPlayerModel } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
 
       const p1 = preloadPlayerModel();
       const p2 = preloadPlayerModel();
@@ -85,7 +85,7 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations: [] });
       });
-      const { preloadPlayerModel } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
 
       await preloadPlayerModel();
       expect(mesh.castShadow).toBe(true);
@@ -96,7 +96,7 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene }); // no animations property
       });
-      const { preloadPlayerModel, createPlayerMesh } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel, createPlayerMesh } = await import('../../client/entities/PlayerModel.js');
 
       await preloadPlayerModel();
       const { mixer } = createPlayerMesh();
@@ -107,7 +107,7 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess, _progress, onError) => {
         onError(new Error('Network failure'));
       });
-      const { preloadPlayerModel } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
 
       await expect(preloadPlayerModel()).rejects.toThrow('Network failure');
     });
@@ -115,14 +115,14 @@ describe('Model loading pipeline', () => {
 
   describe('createPlayerMesh — fallback (no cached model)', () => {
     it('returns group with 3 children (body, head, shoulders)', async () => {
-      const { createPlayerMesh } = await import('../../client/entities/Player.js');
+      const { createPlayerMesh } = await import('../../client/entities/PlayerModel.js');
       const { group } = createPlayerMesh(0xff0000);
 
       expect(group.children.length).toBe(3);
     });
 
     it('returns null mixer and empty actions', async () => {
-      const { createPlayerMesh } = await import('../../client/entities/Player.js');
+      const { createPlayerMesh } = await import('../../client/entities/PlayerModel.js');
       const { mixer, actions } = createPlayerMesh();
 
       expect(mixer).toBeNull();
@@ -130,7 +130,7 @@ describe('Model loading pipeline', () => {
     });
 
     it('positions body at y=0.9, head at y=1.65, shoulders at y=1.35', async () => {
-      const { createPlayerMesh } = await import('../../client/entities/Player.js');
+      const { createPlayerMesh } = await import('../../client/entities/PlayerModel.js');
       const { group } = createPlayerMesh();
 
       expect(group.children[0].position.y).toBe(0.9);
@@ -139,7 +139,7 @@ describe('Model loading pipeline', () => {
     });
 
     it('all fallback parts have castShadow enabled', async () => {
-      const { createPlayerMesh } = await import('../../client/entities/Player.js');
+      const { createPlayerMesh } = await import('../../client/entities/PlayerModel.js');
       const { group } = createPlayerMesh();
 
       group.children.forEach(child => {
@@ -154,7 +154,7 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations });
       });
-      const mod = await import('../../client/entities/Player.js');
+      const mod = await import('../../client/entities/PlayerModel.js');
       await mod.preloadPlayerModel();
       return { ...mod, scene };
     }
@@ -232,7 +232,8 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations: makeMockAnimations(['Stand', 'Run']) });
       });
-      const { preloadPlayerModel, LocalPlayer } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
+      const { LocalPlayer } = await import('../../client/entities/Player.js');
       await preloadPlayerModel();
 
       const player = new LocalPlayer('crossfade', 'Crossfade');
@@ -249,7 +250,8 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations: makeMockAnimations(['Stand']) });
       });
-      const { preloadPlayerModel, LocalPlayer } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
+      const { LocalPlayer } = await import('../../client/entities/Player.js');
       await preloadPlayerModel();
 
       const player = new LocalPlayer('same', 'Same');
@@ -264,7 +266,8 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations: makeMockAnimations(['Stand']) });
       });
-      const { preloadPlayerModel, LocalPlayer } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
+      const { LocalPlayer } = await import('../../client/entities/Player.js');
       await preloadPlayerModel();
 
       const player = new LocalPlayer('unknown', 'Unknown');
@@ -279,7 +282,8 @@ describe('Model loading pipeline', () => {
       mockLoadFn.mockImplementation((url, onSuccess) => {
         onSuccess({ scene, animations: makeMockAnimations(['Stand', 'Run']) });
       });
-      const { preloadPlayerModel, LocalPlayer } = await import('../../client/entities/Player.js');
+      const { preloadPlayerModel } = await import('../../client/entities/PlayerModel.js');
+      const { LocalPlayer } = await import('../../client/entities/Player.js');
       await preloadPlayerModel();
 
       const player = new LocalPlayer('tick', 'Tick');

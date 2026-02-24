@@ -67,6 +67,13 @@ export class Group {
     child.parent = this;
     this.children.push(child);
   }
+  remove(child) {
+    const idx = this.children.indexOf(child);
+    if (idx !== -1) {
+      this.children.splice(idx, 1);
+      child.parent = null;
+    }
+  }
   updateMatrix() {
     const e = this.matrix.elements;
     e.fill(0);
@@ -305,3 +312,43 @@ export const ClampToEdgeWrapping = 1001;
 export const LinearMipmapLinearFilter = 1008;
 export const SRGBColorSpace = 'srgb';
 export const PCFSoftShadowMap = 2;
+
+// Clock
+export class Clock {
+  constructor() { this._lastTime = 0; }
+  getDelta() { return 0.016; }
+  getElapsedTime() { return 0; }
+}
+
+// WebGLRenderer
+export class WebGLRenderer {
+  constructor(opts = {}) {
+    this.domElement = opts.canvas || {};
+    this.shadowMap = { enabled: false, type: 0 };
+  }
+  setSize() {}
+  setPixelRatio() {}
+  render() {}
+}
+
+// PerspectiveCamera
+export class PerspectiveCamera {
+  constructor(fov, aspect, near, far) {
+    this.fov = fov;
+    this.aspect = aspect;
+    this.near = near;
+    this.far = far;
+    this.position = new Vector3();
+  }
+  lookAt() {}
+  updateProjectionMatrix() {}
+}
+
+// Quaternion
+export class Quaternion {
+  constructor(x = 0, y = 0, z = 0, w = 1) {
+    this.x = x; this.y = y; this.z = z; this.w = w;
+  }
+  setFromAxisAngle() { return this; }
+  multiply() { return this; }
+}
