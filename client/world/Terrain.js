@@ -78,7 +78,7 @@ function createTileMesh(tileRow, tileCol) {
       positions[vi * 3 + 2] = (gr - CENTER_ROW) * cellSize;                  // z
 
       uvs[vi * 2]     = c / 128;
-      uvs[vi * 2 + 1] = r / 128;
+      uvs[vi * 2 + 1] = 1 - (r / 128);  // Flip V coordinate (PIL top-left vs WebGL bottom-left)
     }
   }
 

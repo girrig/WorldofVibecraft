@@ -154,6 +154,44 @@ def extract_from_mpq(storm, data_dir, filepath):
     return None
 
 
+# ── MPQ Archive Pool (keeps archives open for fast access) ──────────────────
+
+class MPQArchivePool:
+    """Opens all MPQ archives once and keeps them open for fast repeated access."""
+    def __init__(self, storm, data_dir, mpq_list):
+        self.storm = storm
+        self.data_dir = data_dir
+        self.handles = []  # List of (mpq_name, handle) tuples
+
+        print(f"Opening {len(mpq_list)} MPQ archives...")
+        for mpq_name in mpq_list:
+            mpq_path = data_dir / mpq_name
+            if not mpq_path.exists():
+                continue
+            handle = storm.open_archive(mpq_path)
+            if handle:
+                self.handles.append((mpq_name, handle))
+
+        print(f"  Opened {len(self.handles)} archives successfully")
+
+    def read_file(self, filepath):
+        """Try to read a file from archives (highest priority first)."""
+        # Search in reverse order (highest priority first)
+        for mpq_name, handle in reversed(self.handles):
+            if self.storm.has_file(handle, filepath):
+                data = self.storm.read_file(handle, filepath)
+                if data:
+                    print(f"  Found {filepath} in {mpq_name}")
+                    return data
+        return None
+
+    def close_all(self):
+        """Close all open archives."""
+        for mpq_name, handle in self.handles:
+            self.storm.close_archive(handle)
+        self.handles.clear()
+
+
 # ── M2 parser ───────────────────────────────────────────────────────────────
 
 def read_m2array(data, offset):
@@ -830,11 +868,12 @@ def main():
 
     print(f"Loading StormLib from {STORMLIB_DLL}")
     storm = StormLib(STORMLIB_DLL)
+    archive_pool = MPQArchivePool(storm, data_dir, MPQ_LOAD_ORDER)
 
     # Extract M2 file
     m2_filepath = model_path + ".m2"
     print(f"\nExtracting {m2_filepath}...")
-    m2_data = extract_from_mpq(storm, data_dir, m2_filepath)
+    m2_data = archive_pool.read_file(m2_filepath)
     if m2_data is None:
         print(f"ERROR: Could not find {m2_filepath} in any MPQ archive")
         sys.exit(1)
@@ -864,7 +903,7 @@ def main():
     model_name = model_path.rsplit("\\", 1)[-1]
     skin_filepath = model_path + "00.skin"
     print(f"\nExtracting {skin_filepath}...")
-    skin_data = extract_from_mpq(storm, data_dir, skin_filepath)
+    skin_data = archive_pool.read_file(skin_filepath)
     if skin_data is None:
         print(f"ERROR: Could not find {skin_filepath} in any MPQ archive")
         sys.exit(1)
@@ -882,7 +921,7 @@ def main():
     if model_path in DEFAULT_SKIN_TEXTURES:
         for tex_path in DEFAULT_SKIN_TEXTURES[model_path]:
             print(f"\nTrying skin texture {tex_path}...")
-            blp_data = extract_from_mpq(storm, data_dir, tex_path)
+            blp_data = archive_pool.read_file(tex_path)
             if blp_data:
                 png_data = blp_to_png_bytes(blp_data)
                 if png_data:
@@ -894,7 +933,7 @@ def main():
         for tex in m2_textures:
             if tex["type"] == 0 and tex["filename"]:
                 print(f"\nExtracting texture {tex['filename']}...")
-                blp_data = extract_from_mpq(storm, data_dir, tex["filename"])
+                blp_data = archive_pool.read_file(tex["filename"])
                 if blp_data:
                     png_data = blp_to_png_bytes(blp_data)
                     if png_data:
@@ -930,6 +969,9 @@ def main():
     gltf.save(str(output_path))
     file_size = output_path.stat().st_size
     print(f"Done! Output: {output_path} ({file_size / 1024:.1f} KB)")
+
+    # Close all archives
+    archive_pool.close_all()
 
 
 if __name__ == "__main__":

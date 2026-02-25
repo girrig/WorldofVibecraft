@@ -134,6 +134,43 @@ def extract_from_mpq(storm, data_dir, filepath):
     return None
 
 
+# ── MPQ Archive Pool (keeps archives open for fast access) ──────────────────
+
+class MPQArchivePool:
+    """Opens all MPQ archives once and keeps them open for fast repeated access."""
+    def __init__(self, storm, data_dir, mpq_list):
+        self.storm = storm
+        self.data_dir = data_dir
+        self.handles = []  # List of (mpq_name, handle) tuples
+
+        print(f"Opening {len(mpq_list)} MPQ archives...")
+        for mpq_name in mpq_list:
+            mpq_path = data_dir / mpq_name
+            if not mpq_path.exists():
+                continue
+            handle = storm.open_archive(mpq_path)
+            if handle:
+                self.handles.append((mpq_name, handle))
+
+        print(f"  Opened {len(self.handles)} archives successfully")
+
+    def read_file(self, filepath):
+        """Try to read a file from archives (highest priority first)."""
+        # Search in reverse order (highest priority first)
+        for mpq_name, handle in reversed(self.handles):
+            if self.storm.has_file(handle, filepath):
+                data = self.storm.read_file(handle, filepath)
+                if data:
+                    return data
+        return None
+
+    def close_all(self):
+        """Close all open archives."""
+        for mpq_name, handle in self.handles:
+            self.storm.close_archive(handle)
+        self.handles.clear()
+
+
 # ── IFF Chunk Scanner ──────────────────────────────────────────────────────
 
 def scan_chunks(data, start=0, end=None):
@@ -422,11 +459,12 @@ def read_alpha_map(alpha_raw, offset, layer_flags, big_alpha):
 
 # ── Texture Baking ─────────────────────────────────────────────────────────
 
-def bake_tile_texture(chunks_grid, mtex_list, storm, data_dir, mphd_flags,
-                      chunk_px=64):
+def bake_tile_texture(chunks_grid, mtex_list, archive_pool, mphd_flags,
+                      chunk_px=256):
     """
     Bake terrain texture for one ADT tile.
     chunks_grid: 16x16 list-of-lists of MCNK dicts (indexed [row][col]).
+    archive_pool: MPQArchivePool instance with open archives
     Returns PIL Image of size (chunk_px*16, chunk_px*16).
     """
     tile_size = chunk_px * 16
@@ -435,12 +473,33 @@ def bake_tile_texture(chunks_grid, mtex_list, storm, data_dir, mphd_flags,
     big_alpha = bool(mphd_flags & 0x4)
     texture_cache = {}
 
-    def get_texture(tex_path):
-        if tex_path in texture_cache:
-            return texture_cache[tex_path]
-        try:
-            blp_data = extract_from_mpq(storm, data_dir, tex_path)
+    def get_texture(tex_path_orig):
+        if tex_path_orig in texture_cache:
+            return texture_cache[tex_path_orig]
+
+        # MPQ paths need backslashes, and terrain textures might need TEXTURES\ prefix
+        # Try multiple path formats to find the texture
+        tex_path = tex_path_orig.replace("/", "\\")
+
+        # Try with TEXTURES\ prefix first
+        tex_paths_to_try = [
+            f"TEXTURES\\{tex_path}",
+            tex_path,  # without prefix
+            tex_path_orig,  # original with forward slashes
+        ]
+
+        # Try each path variant until one works
+        blp_data = None
+        successful_path = None
+
+        for try_path in tex_paths_to_try:
+            blp_data = archive_pool.read_file(try_path)
             if blp_data:
+                successful_path = try_path
+                break
+
+        if blp_data:
+            try:
                 img = Image.open(io.BytesIO(blp_data)).convert("RGBA")
                 # Tile the texture and resize to chunk resolution
                 # Terrain textures repeat ~4 times per chunk visually
@@ -452,11 +511,15 @@ def bake_tile_texture(chunks_grid, mtex_list, storm, data_dir, mphd_flags,
                     for j in range(repeats):
                         big.paste(img, (i * img.width, j * img.height))
                 resized = big.resize((chunk_px, chunk_px), Image.LANCZOS)
-                texture_cache[tex_path] = resized
+                texture_cache[tex_path_orig] = resized
+                print(f"    [OK] Loaded: {successful_path} ({img.width}x{img.height})")
                 return resized
-        except Exception as e:
-            print(f"    Warning: texture load failed for {tex_path}: {e}")
-        texture_cache[tex_path] = None
+            except Exception as e:
+                print(f"    [ERROR] Failed to decode BLP: {successful_path}: {e}")
+        else:
+            print(f"    [FAIL] Not found (tried {len(tex_paths_to_try)} paths): {tex_path_orig}")
+
+        texture_cache[tex_path_orig] = None
         return None
 
     for row in range(16):
@@ -776,11 +839,12 @@ def main():
     print(f"Output dir: {output_dir}")
 
     storm = StormLib(STORMLIB_DLL)
+    archive_pool = MPQArchivePool(storm, data_dir, MPQ_LOAD_ORDER)
 
     # ── Step 1: Parse WDT ──
     print("\n== Reading WDT ==")
     wdt_path = r"World\Maps\Azeroth\Azeroth.wdt"
-    wdt_data = extract_from_mpq(storm, data_dir, wdt_path)
+    wdt_data = archive_pool.read_file(wdt_path)
     if not wdt_data:
         print(f"ERROR: Could not find {wdt_path}")
         sys.exit(1)
@@ -818,7 +882,7 @@ def main():
     for tx, ty in tiles_to_extract:
         adt_path = f"World\\Maps\\Azeroth\\Azeroth_{tx}_{ty}.adt"
         print(f"\n== Reading ADT ({tx}, {ty}) ==")
-        adt_data = extract_from_mpq(storm, data_dir, adt_path)
+        adt_data = archive_pool.read_file(adt_path)
         if not adt_data:
             print(f"  ERROR: Could not read {adt_path}")
             continue
@@ -945,7 +1009,7 @@ def main():
                     chunks_grid[row][col] = chunk
 
             tile_img = bake_tile_texture(
-                chunks_grid, mtex_list, storm, data_dir, mphd_flags
+                chunks_grid, mtex_list, archive_pool, mphd_flags
             )
 
             tex_path = output_dir / f"northshire_tex_{tex_idx}.png"
@@ -982,6 +1046,9 @@ def main():
     print(f"  Height range: {grid.min():.1f} to {grid.max():.1f}")
     print(f"  Doodads: {doodad_json['totalDoodads']}, WMOs: {doodad_json['totalWmos']}")
     print(f"  Output directory: {output_dir}")
+
+    # Close all archives
+    archive_pool.close_all()
 
 
 if __name__ == "__main__":
