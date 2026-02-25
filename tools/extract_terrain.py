@@ -769,11 +769,11 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
             three_z = ofs_z + p[2]
             three_y = p[1] - center_height
 
-            # ADT rotations are in degrees! Try raw values (no offsets):
-            # Since we're Y-up -> Y-up, no coordinate conversion needed
-            # Just use raw rotations with axis mapping
+            # ADT rotations are in degrees!
+            # Models were converted from Z-up to Y-up, adjustments needed:
+            # - Yaw: -90° offset for coordinate system conversion
             rot_x = entry["rotation"][2]  # Roll
-            rot_y = entry["rotation"][1]  # Yaw
+            rot_y = entry["rotation"][1] - 90.0  # Yaw (coordinate system offset)
             rot_z = entry["rotation"][0]  # Pitch
 
             scale = entry["scale"] / 1024.0
@@ -803,11 +803,11 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
             three_z = ofs_z + p[2]
             three_y = p[1] - center_height
 
-            # ADT rotations are in degrees! Try raw values (no offsets):
-            # Since we're Y-up -> Y-up, no coordinate conversion needed
-            # Just use raw rotations with axis mapping
+            # ADT rotations are in degrees!
+            # Models were converted from Z-up to Y-up, adjustments needed:
+            # - Yaw: -90° offset for coordinate system conversion
             rot_x = entry["rotation"][2]  # Roll
-            rot_y = entry["rotation"][1]  # Yaw
+            rot_y = entry["rotation"][1] - 90.0  # Yaw (coordinate system offset)
             rot_z = entry["rotation"][0]  # Pitch
 
             # Bounding box size from extents

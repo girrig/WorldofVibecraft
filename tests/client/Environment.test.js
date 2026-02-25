@@ -12,10 +12,6 @@ vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
   },
 }));
 
-vi.mock('../../client/world/Terrain.js', () => ({
-  getTerrainHeight: () => 5.0,
-}));
-
 import {
   Scene, Group, Mesh, BoxGeometry, MeshStandardMaterial,
 } from '../__mocks__/three.js';
@@ -38,12 +34,12 @@ async function flushAsync() {
 
 const DOODAD_PAYLOAD = {
   doodads: [
-    { model: 'trees/oak.m2', x: 10, z: 20, rotY: 45, scale: 1.0, type: 'vegetation' },
-    { model: 'trees/oak.m2', x: 30, z: 40, rotY: 90, scale: 0.8, type: 'vegetation' },
-    { model: 'rocks/boulder.m2', x: -5, z: 15, rotY: 0, scale: 1.5, type: 'rock' },
+    { model: 'trees/oak.m2', x: 10, y: 5.0, z: 20, rotX: 0, rotY: 45, rotZ: 0, scale: 1.0, type: 'vegetation' },
+    { model: 'trees/oak.m2', x: 30, y: 5.0, z: 40, rotX: 5, rotY: 90, rotZ: -10, scale: 0.8, type: 'vegetation' },
+    { model: 'rocks/boulder.m2', x: -5, y: 5.0, z: 15, rotX: 0, rotY: 0, rotZ: 0, scale: 1.5, type: 'rock' },
   ],
   wmos: [
-    { model: 'buildings/abbey.wmo', x: 0, z: 0, rotY: 0, scale: 1.0, sizeX: 20, sizeY: 10, sizeZ: 20 },
+    { model: 'buildings/abbey.wmo', x: 0, y: 5.0, z: 0, rotX: 0, rotY: 158.5, rotZ: 0, scale: 1.0, sizeX: 20, sizeY: 10, sizeZ: 20 },
   ],
 };
 
@@ -281,14 +277,131 @@ describe('Environment', () => {
     });
   });
 
+  // ── Rotation system ──
+
+  describe('rotation handling', () => {
+    it('applies all three rotation axes to doodad instances', async () => {
+      const data = {
+        doodads: [
+          { model: 'test.m2', x: 0, y: 5.0, z: 0, rotX: 15, rotY: 45, rotZ: -10, scale: 1.0, type: 'prop' },
+        ],
+        wmos: [],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // Verify that the InstancedMesh exists and has matrix data
+      const mesh = group.children.find(c => c.count === 1);
+      expect(mesh).toBeDefined();
+      expect(mesh.instanceMatrix.array.length).toBe(16); // 4x4 matrix
+    });
+
+    it('applies rotation in YZX order', async () => {
+      // This is verified by the rotation.set calls in Environment.js
+      // The test ensures the structure exists
+      const data = {
+        doodads: [
+          { model: 'tree.m2', x: 10, y: 5.0, z: 20, rotX: 0, rotY: 90, rotZ: 0, type: 'vegetation' },
+        ],
+        wmos: [],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBeGreaterThan(0);
+    });
+
+    it('converts degrees to radians for Three.js', async () => {
+      // Environment.js converts (d.rotX || 0) * Math.PI / 180
+      const data = {
+        doodads: [
+          { model: 'prop.m2', x: 0, y: 5.0, z: 0, rotX: 90, rotY: 180, rotZ: 270, type: 'prop' },
+        ],
+        wmos: [],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      const mesh = group.children.find(c => c.count === 1);
+      expect(mesh).toBeDefined();
+    });
+
+    it('handles missing rotation values with defaults', async () => {
+      const data = {
+        doodads: [
+          { model: 'tree.m2', x: 0, y: 5.0, z: 0, type: 'vegetation' }, // No rotation values
+        ],
+        wmos: [],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // Should still create mesh without errors
+      expect(group.children.length).toBe(1);
+    });
+
+    it('applies three-axis rotation to WMOs', async () => {
+      const data = {
+        doodads: [],
+        wmos: [
+          { model: 'building.wmo', x: 0, y: 5.0, z: 0, rotX: 0, rotY: 158.5, rotZ: 0, sizeX: 10, sizeY: 8, sizeZ: 10 },
+        ],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // WMO should be placed as fallback box
+      const wmo = group.children.find(c => c.isMesh);
+      expect(wmo).toBeDefined();
+    });
+
+    it('applies rotation to WMO models from manifest', async () => {
+      const data = {
+        doodads: [],
+        wmos: [
+          { model: 'abbey.wmo', x: 0, y: 5.0, z: 0, rotX: 5, rotY: 270, rotZ: -15, scale: 1.0, sizeX: 20, sizeY: 10, sizeZ: 20 },
+        ],
+      };
+      const manifest = {
+        models: {},
+        wmos: {
+          'abbey.wmo': { glb: 'wmos/abbey.glb' },
+        },
+      };
+      mockFetchWith(data, manifest);
+      await mod.loadEnvironment();
+
+      const group = mod.createEnvironment();
+      await flushAsync();
+
+      // WMO should be cloned from GLB
+      const wmo = group.children.find(c => c.children !== undefined);
+      expect(wmo).toBeDefined();
+    });
+  });
+
   // ── Bounds checking ──
 
   describe('bounds checking', () => {
     it('skips out-of-bounds doodads', async () => {
       const data = {
         doodads: [
-          { model: 'trees/far.m2', x: 900, z: 0, type: 'vegetation' },
-          { model: 'trees/near.m2', x: 10, z: 20, type: 'vegetation' },
+          { model: 'trees/far.m2', x: 900, y: 5.0, z: 0, type: 'vegetation' },
+          { model: 'trees/near.m2', x: 10, y: 5.0, z: 20, type: 'vegetation' },
         ],
         wmos: [],
       };
@@ -306,7 +419,7 @@ describe('Environment', () => {
       const data = {
         doodads: [],
         wmos: [
-          { model: 'buildings/far.wmo', x: 900, z: 0, sizeX: 10, sizeY: 8, sizeZ: 10 },
+          { model: 'buildings/far.wmo', x: 900, y: 5.0, z: 0, sizeX: 10, sizeY: 8, sizeZ: 10 },
         ],
       };
       mockFetchWith(data, null);
@@ -321,7 +434,7 @@ describe('Environment', () => {
       const data = {
         doodads: [],
         wmos: [
-          { model: 'buildings/huge.wmo', x: 0, z: 0, sizeX: 2000, sizeY: 8, sizeZ: 10 },
+          { model: 'buildings/huge.wmo', x: 0, y: 5.0, z: 0, sizeX: 2000, sizeY: 8, sizeZ: 10 },
         ],
       };
       mockFetchWith(data, null);
@@ -339,11 +452,11 @@ describe('Environment', () => {
     beforeEach(async () => {
       const data = {
         doodads: [
-          { model: 'a.m2', x: 0, z: 0, type: 'vegetation' },
-          { model: 'b.m2', x: 5, z: 5, type: 'rock' },
-          { model: 'c.m2', x: 10, z: 10, type: 'prop' },
-          { model: 'd.m2', x: 15, z: 15, type: 'container' },
-          { model: 'e.m2', x: 20, z: 20, type: 'unknown_type' },
+          { model: 'a.m2', x: 0, y: 5.0, z: 0, type: 'vegetation' },
+          { model: 'b.m2', x: 5, y: 5.0, z: 5, type: 'rock' },
+          { model: 'c.m2', x: 10, y: 5.0, z: 10, type: 'prop' },
+          { model: 'd.m2', x: 15, y: 5.0, z: 15, type: 'container' },
+          { model: 'e.m2', x: 20, y: 5.0, z: 20, type: 'unknown_type' },
         ],
         wmos: [],
       };

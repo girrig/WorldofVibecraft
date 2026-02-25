@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { getTerrainHeight } from './Terrain.js';
 import { WORLD_SIZE } from '../../shared/constants.js';
 
 // ── Module state ──
@@ -90,9 +89,8 @@ function placeFallbackInstances(group, instances) {
   const dummy = new THREE.Object3D();
   for (let i = 0; i < instances.length; i++) {
     const d = instances[i];
-    const terrainY = getTerrainHeight(d.x, d.z);
-    const y = terrainY + shape.yOffset * (d.scale || 1.0);
-    dummy.position.set(d.x, y, d.z);
+    // Use Y coordinate from ADT data directly (already at correct height)
+    dummy.position.set(d.x, d.y, d.z);
     // Apply all three rotation axes (YZX order per wowdev.wiki)
     dummy.rotation.set(
       (d.rotX || 0) * Math.PI / 180,
@@ -122,8 +120,8 @@ function placeWMOFallback(group, wmo) {
     opacity: 0.7,
   });
   const mesh = new THREE.Mesh(geom, mat);
-  const terrainY = getTerrainHeight(wmo.x, wmo.z);
-  mesh.position.set(wmo.x, terrainY + sy / 2, wmo.z);
+  // Use Y coordinate from ADT data directly (already at correct height)
+  mesh.position.set(wmo.x, wmo.y, wmo.z);
   // Apply all three rotation axes (YZX order per wowdev.wiki)
   mesh.rotation.set(
     (wmo.rotX || 0) * Math.PI / 180,
@@ -159,8 +157,8 @@ async function loadAndPlaceModel(group, modelPath, instances) {
         const dummy = new THREE.Object3D();
         for (let i = 0; i < instances.length; i++) {
           const d = instances[i];
-          const terrainY = getTerrainHeight(d.x, d.z);
-          dummy.position.set(d.x, terrainY, d.z);
+          // Use Y coordinate from ADT data (more accurate than terrain mesh)
+          dummy.position.set(d.x, d.y, d.z);
           // Apply all three rotation axes (YZX order per wowdev.wiki)
           dummy.rotation.set(
             (d.rotX || 0) * Math.PI / 180,
@@ -204,8 +202,8 @@ async function loadAndPlaceWMO(group, wmo) {
       const gltf = await loadGLB('/assets/models/' + glbInfo.glb);
       const model = gltf.scene.clone();
 
-      const terrainY = getTerrainHeight(wmo.x, wmo.z);
-      model.position.set(wmo.x, terrainY, wmo.z);
+      // Use Y coordinate from ADT data (more accurate than terrain mesh)
+      model.position.set(wmo.x, wmo.y, wmo.z);
       // Apply all three rotation axes (YZX order per wowdev.wiki)
       model.rotation.set(
         (wmo.rotX || 0) * Math.PI / 180,
