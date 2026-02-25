@@ -35,6 +35,43 @@ DEFAULT_DOODAD_JSON = SCRIPT_DIR / ".." / "client" / "public" / "assets" / "terr
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR / ".." / "client" / "public" / "assets" / "models"
 
 
+# ── MPQ Archive Pool (keeps archives open for fast access) ──────────────────
+
+class MPQArchivePool:
+    """Opens all MPQ archives once and keeps them open for fast repeated access."""
+    def __init__(self, storm, data_dir, mpq_list):
+        self.storm = storm
+        self.data_dir = data_dir
+        self.handles = []  # List of (mpq_name, handle) tuples
+
+        print(f"Opening {len(mpq_list)} MPQ archives...")
+        for mpq_name in mpq_list:
+            mpq_path = data_dir / mpq_name
+            if not mpq_path.exists():
+                continue
+            handle = storm.open_archive(mpq_path)
+            if handle:
+                self.handles.append((mpq_name, handle))
+
+        print(f"  Opened {len(self.handles)} archives successfully")
+
+    def read_file(self, filepath):
+        """Try to read a file from archives (highest priority first)."""
+        # Search in reverse order (highest priority first)
+        for mpq_name, handle in reversed(self.handles):
+            if self.storm.has_file(handle, filepath):
+                data = self.storm.read_file(handle, filepath)
+                if data:
+                    return data
+        return None
+
+    def close_all(self):
+        """Close all open archives."""
+        for mpq_name, handle in self.handles:
+            self.storm.close_archive(handle)
+        self.handles.clear()
+
+
 def sanitize_model_name(wow_path):
     """Convert WoW model path to a GLB filename.
     Handles collisions via the caller (appends counter if needed).
@@ -218,10 +255,11 @@ def build_doodad_glb(m2_vertices, local_to_global, indices, submeshes,
     return gltf
 
 
-def extract_single_doodad(storm, data_dir, wow_model_path):
+def extract_single_doodad(archive_pool, wow_model_path):
     """
     Extract a single M2 doodad model and return a pygltflib.GLTF2 object.
     Returns None on failure.
+    archive_pool: MPQArchivePool instance with open archives
     """
     # Normalize path separators for MPQ
     mpq_path = wow_model_path.replace("/", "\\")
@@ -231,7 +269,7 @@ def extract_single_doodad(storm, data_dir, wow_model_path):
         mpq_path += ".m2"
 
     # Extract M2 file
-    m2_data = extract_from_mpq(storm, data_dir, mpq_path)
+    m2_data = archive_pool.read_file(mpq_path)
     if m2_data is None:
         return None
 
@@ -252,7 +290,7 @@ def extract_single_doodad(storm, data_dir, wow_model_path):
 
     # Extract .skin file
     skin_mpq_path = mpq_path[:-3] + "00.skin"  # strip .m2, add 00.skin
-    skin_data = extract_from_mpq(storm, data_dir, skin_mpq_path)
+    skin_data = archive_pool.read_file(skin_mpq_path)
     if skin_data is None:
         print(f"    No .skin file found at {skin_mpq_path}")
         return None
@@ -278,7 +316,7 @@ def extract_single_doodad(storm, data_dir, wow_model_path):
     for ti, tex in enumerate(m2_textures):
         if tex["type"] == 0 and tex["filename"]:
             tex_mpq_path = tex["filename"].replace("/", "\\")
-            blp_data = extract_from_mpq(storm, data_dir, tex_mpq_path)
+            blp_data = archive_pool.read_file(tex_mpq_path)
             if blp_data:
                 png = blp_to_png_bytes(blp_data)
                 if png:
@@ -298,6 +336,10 @@ def main():
                         help="Path to northshire_doodads.json")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR),
                         help="Output base directory for models")
+    parser.add_argument("--force", action="store_true",
+                        help="Force re-extraction of existing files")
+    parser.add_argument("--limit", type=int,
+                        help="Only extract first N models (for testing)")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -317,22 +359,33 @@ def main():
         model_counts[d["model"]] += 1
 
     unique_models = sorted(model_counts.items(), key=lambda x: -x[1])
+
+    # Apply limit if specified
+    if args.limit and args.limit > 0:
+        unique_models = unique_models[:args.limit]
+        print(f"Limiting to first {len(unique_models)} models (--limit {args.limit})")
+
     print(f"Found {len(unique_models)} unique M2 models ({sum(model_counts.values())} total instances)")
     print(f"Top 10:")
     for path, count in unique_models[:10]:
         basename = path.rsplit("/", 1)[-1]
         print(f"  {basename}: {count} instances")
 
-    # Initialize StormLib
+    # Initialize StormLib and open all archives
     print(f"\nLoading StormLib from {STORMLIB_DLL}...")
     storm = StormLib(STORMLIB_DLL)
+    archive_pool = MPQArchivePool(storm, data_dir, MPQ_LOAD_ORDER)
 
     # Track filename collisions
     used_filenames = {}  # sanitized name → wow path
-    manifest = {"models": {}, "totalExtracted": 0, "totalFailed": 0}
+    manifest = {"models": {}, "totalExtracted": 0, "totalFailed": 0, "totalSkipped": 0}
     total_size = 0
 
-    print(f"\n== Extracting {len(unique_models)} doodad models ==\n")
+    print(f"\n== Extracting {len(unique_models)} doodad models ==")
+    if not args.force:
+        print(f"   (Caching enabled - existing files will be skipped. Use --force to override)\n")
+    else:
+        print(f"   (--force enabled - re-extracting all models)\n")
 
     for i, (wow_path, instance_count) in enumerate(unique_models):
         basename = sanitize_model_name(wow_path)
@@ -350,10 +403,24 @@ def main():
 
         progress = f"[{i+1}/{len(unique_models)}]"
         short_name = wow_path.rsplit("/", 1)[-1]
+
+        # Check cache unless --force
+        if not args.force and glb_path.exists():
+            file_size = glb_path.stat().st_size
+            total_size += file_size
+            manifest["models"][wow_path] = {
+                "glb": "doodads/" + basename,
+                "instances": instance_count,
+            }
+            manifest["totalSkipped"] += 1
+            if (i + 1) % 100 == 0:  # Progress update every 100 files
+                print(f"{progress} Checked {i+1} files ({manifest['totalSkipped']} cached)...")
+            continue
+
         print(f"{progress} {short_name} ({instance_count} instances)...")
 
         try:
-            gltf = extract_single_doodad(storm, data_dir, wow_path)
+            gltf = extract_single_doodad(archive_pool, wow_path)
             if gltf is None:
                 print(f"  SKIP: extraction failed")
                 manifest["totalFailed"] += 1
@@ -375,6 +442,9 @@ def main():
             manifest["totalFailed"] += 1
             continue
 
+    # Close all archives
+    archive_pool.close_all()
+
     # Write manifest
     manifest_path = output_dir / "doodad_manifest.json"
     with open(manifest_path, "w") as f:
@@ -382,6 +452,7 @@ def main():
 
     print(f"\n== Done ==")
     print(f"  Extracted: {manifest['totalExtracted']}/{len(unique_models)} models")
+    print(f"  Cached (skipped): {manifest['totalSkipped']}")
     print(f"  Failed: {manifest['totalFailed']}")
     print(f"  Total size: {total_size / 1024 / 1024:.1f} MB")
     print(f"  Manifest: {manifest_path}")

@@ -31,6 +31,43 @@ DEFAULT_DOODAD_JSON = SCRIPT_DIR / ".." / "client" / "public" / "assets" / "terr
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR / ".." / "client" / "public" / "assets" / "models"
 
 
+# ── MPQ Archive Pool (keeps archives open for fast access) ──────────────────
+
+class MPQArchivePool:
+    """Opens all MPQ archives once and keeps them open for fast repeated access."""
+    def __init__(self, storm, data_dir, mpq_list):
+        self.storm = storm
+        self.data_dir = data_dir
+        self.handles = []  # List of (mpq_name, handle) tuples
+
+        print(f"Opening {len(mpq_list)} MPQ archives...")
+        for mpq_name in mpq_list:
+            mpq_path = data_dir / mpq_name
+            if not mpq_path.exists():
+                continue
+            handle = storm.open_archive(mpq_path)
+            if handle:
+                self.handles.append((mpq_name, handle))
+
+        print(f"  Opened {len(self.handles)} archives successfully")
+
+    def read_file(self, filepath):
+        """Try to read a file from archives (highest priority first)."""
+        # Search in reverse order (highest priority first)
+        for mpq_name, handle in reversed(self.handles):
+            if self.storm.has_file(handle, filepath):
+                data = self.storm.read_file(handle, filepath)
+                if data:
+                    return data
+        return None
+
+    def close_all(self):
+        """Close all open archives."""
+        for mpq_name, handle in self.handles:
+            self.storm.close_archive(handle)
+        self.handles.clear()
+
+
 # ── IFF chunk scanner (same pattern as extract_terrain.py) ──────────────────
 
 def scan_chunks(data, start=0):
@@ -211,10 +248,11 @@ def parse_wmo_group(data):
 
 # ── GLB builder for WMO ─────────────────────────────────────────────────────
 
-def build_wmo_glb(root_info, group_geometries, storm, data_dir):
+def build_wmo_glb(root_info, group_geometries, archive_pool):
     """
     Build a GLB from WMO root + groups.
     Merges all groups, splits by material for multi-primitive mesh.
+    archive_pool: MPQArchivePool instance with open archives
     """
     # Merge all group geometry with vertex offset tracking
     all_verts = []
@@ -332,7 +370,7 @@ def build_wmo_glb(root_info, group_geometries, storm, data_dir):
             tex_path = mat.get("texturePath", "")
             if tex_path:
                 mpq_path = tex_path.replace("/", "\\")
-                blp_data = extract_from_mpq(storm, data_dir, mpq_path)
+                blp_data = archive_pool.read_file(mpq_path)
                 if blp_data:
                     png = blp_to_png_bytes(blp_data)
                     if png:
@@ -424,10 +462,11 @@ def build_wmo_glb(root_info, group_geometries, storm, data_dir):
     return gltf
 
 
-def extract_single_wmo(storm, data_dir, wow_wmo_path):
+def extract_single_wmo(archive_pool, wow_wmo_path):
     """
     Extract a single WMO (root + all groups) and return a pygltflib.GLTF2 object.
     Returns None on failure.
+    archive_pool: MPQArchivePool instance with open archives
     """
     # Normalize path for MPQ
     mpq_path = wow_wmo_path.replace("/", "\\")
@@ -435,7 +474,7 @@ def extract_single_wmo(storm, data_dir, wow_wmo_path):
         mpq_path += ".wmo"
 
     # Extract root file
-    root_data = extract_from_mpq(storm, data_dir, mpq_path)
+    root_data = archive_pool.read_file(mpq_path)
     if root_data is None:
         print(f"    Root .wmo not found: {mpq_path}")
         return None
@@ -460,7 +499,7 @@ def extract_single_wmo(storm, data_dir, wow_wmo_path):
 
     for gi in range(n_groups):
         group_path = f"{base_path}_{gi:03d}.wmo"
-        group_data = extract_from_mpq(storm, data_dir, group_path)
+        group_data = archive_pool.read_file(group_path)
         if group_data is None:
             print(f"    Group {gi:03d} not found, skipping")
             continue
@@ -477,7 +516,7 @@ def extract_single_wmo(storm, data_dir, wow_wmo_path):
         return None
 
     # Build GLB
-    gltf = build_wmo_glb(root_info, group_geometries, storm, data_dir)
+    gltf = build_wmo_glb(root_info, group_geometries, archive_pool)
     return gltf
 
 
@@ -489,6 +528,8 @@ def main():
                         help="Path to northshire_doodads.json")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR),
                         help="Output base directory for models")
+    parser.add_argument("--force", action="store_true",
+                        help="Force re-extraction of existing files")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -512,9 +553,10 @@ def main():
 
     print(f"Found {len(unique_wmos)} unique WMO models ({sum(unique_wmos.values())} total instances)")
 
-    # Initialize StormLib
+    # Initialize StormLib and open all archives
     print(f"\nLoading StormLib from {STORMLIB_DLL}...")
     storm = StormLib(STORMLIB_DLL)
+    archive_pool = MPQArchivePool(storm, data_dir, MPQ_LOAD_ORDER)
 
     # Load existing manifest to append to
     manifest_path = output_dir / "doodad_manifest.json"
@@ -530,8 +572,13 @@ def main():
     total_size = 0
     extracted = 0
     failed = 0
+    skipped = 0
 
-    print(f"\n== Extracting {len(unique_wmos)} WMO models ==\n")
+    print(f"\n== Extracting {len(unique_wmos)} WMO models ==")
+    if not args.force:
+        print(f"   (Caching enabled - existing files will be skipped. Use --force to override)\n")
+    else:
+        print(f"   (--force enabled - re-extracting all models)\n")
 
     for i, (wow_path, instance_count) in enumerate(sorted(unique_wmos.items())):
         short_name = wow_path.rsplit("/", 1)[-1]
@@ -539,10 +586,21 @@ def main():
         glb_path = wmo_dir / basename
 
         progress = f"[{i+1}/{len(unique_wmos)}]"
+
+        # Check cache unless --force
+        if not args.force and glb_path.exists():
+            file_size = glb_path.stat().st_size
+            total_size += file_size
+            manifest["wmos"][wow_path] = {
+                "glb": "wmos/" + basename,
+            }
+            skipped += 1
+            continue
+
         print(f"{progress} {short_name} ({instance_count} instances)...")
 
         try:
-            gltf = extract_single_wmo(storm, data_dir, wow_path)
+            gltf = extract_single_wmo(archive_pool, wow_path)
             if gltf is None:
                 print(f"  SKIP: extraction failed")
                 failed += 1
@@ -565,14 +623,19 @@ def main():
             failed += 1
             continue
 
+    # Close all archives
+    archive_pool.close_all()
+
     # Update manifest
     manifest["totalWmoExtracted"] = extracted
+    manifest["totalWmoSkipped"] = skipped
     manifest["totalWmoFailed"] = failed
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
     print(f"\n== Done ==")
     print(f"  Extracted: {extracted}/{len(unique_wmos)} WMOs")
+    print(f"  Cached (skipped): {skipped}")
     print(f"  Failed: {failed}")
     print(f"  Total size: {total_size / 1024 / 1024:.1f} MB")
     print(f"  Manifest: {manifest_path}")
