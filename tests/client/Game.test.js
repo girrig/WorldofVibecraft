@@ -134,20 +134,20 @@ describe('Game', () => {
       game.network = { on: vi.fn(), sendMove: vi.fn(), sendChat: vi.fn() };
     });
 
-    it('creates scene', () => {
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+    it('creates scene', async () => {
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
       expect(game.scene).not.toBeNull();
     });
 
-    it('creates local player with given id and name', () => {
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+    it('creates local player with given id and name', async () => {
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
       expect(game.localPlayer).not.toBeNull();
       expect(game.localPlayer.id).toBe('p1');
       expect(game.localPlayer.name).toBe('TestPlayer');
     });
 
-    it('adds existing remote players from welcome data', () => {
-      game.initGame({
+    it('adds existing remote players from welcome data', async () => {
+      await game.initGame({
         id: 'p1',
         players: [
           { id: 'p1', name: 'Me' },
@@ -158,16 +158,16 @@ describe('Game', () => {
       expect(game.remotePlayers.has('p2')).toBe(true);
     });
 
-    it('skips self in welcome player list', () => {
-      game.initGame({
+    it('skips self in welcome player list', async () => {
+      await game.initGame({
         id: 'p1',
         players: [{ id: 'p1', name: 'Me' }],
       }, 'Me');
       expect(game.remotePlayers.size).toBe(0);
     });
 
-    it('creates controls, chatBox, minimap, and hud', () => {
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+    it('creates controls, chatBox, minimap, and hud', async () => {
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
       expect(game.controls).not.toBeNull();
       expect(game.chatBox).not.toBeNull();
       expect(game.minimap).not.toBeNull();
@@ -176,10 +176,10 @@ describe('Game', () => {
   });
 
   describe('setupNetworkHandlers', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       game.initRenderer();
       game.network = { on: vi.fn(), sendMove: vi.fn(), sendChat: vi.fn() };
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
     });
 
     it('registers handlers for PLAYER_JOINED, PLAYER_LEFT, STATE, CHAT', () => {
@@ -192,10 +192,10 @@ describe('Game', () => {
   });
 
   describe('addRemotePlayer', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       game.initRenderer();
       game.network = { on: vi.fn(), sendMove: vi.fn(), sendChat: vi.fn() };
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
     });
 
     it('adds player to remotePlayers map', () => {
@@ -219,10 +219,10 @@ describe('Game', () => {
   describe('network handler callbacks', () => {
     let handlers;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       game.initRenderer();
       game.network = { on: vi.fn(), sendMove: vi.fn(), sendChat: vi.fn() };
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
 
       // Extract registered handlers
       handlers = {};
@@ -297,10 +297,10 @@ describe('Game', () => {
   });
 
   describe('input handling', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       game.initRenderer();
       game.network = { on: vi.fn(), sendMove: vi.fn(), sendChat: vi.fn() };
-      game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
+      await game.initGame({ id: 'p1', players: [] }, 'TestPlayer');
     });
 
     it('creates walk/run overlay', () => {

@@ -84,14 +84,14 @@ describe('Environment', () => {
   // ── No-data tests ──
 
   describe('createEnvironment (no data)', () => {
-    it('returns a group', () => {
-      const env = mod.createEnvironment();
+    it('returns a group', async () => {
+      const env = await await mod.createEnvironment();
       expect(env).toBeDefined();
       expect(env.children).toBeDefined();
     });
 
-    it('returns an empty group when no data loaded', () => {
-      const env = mod.createEnvironment();
+    it('returns an empty group when no data loaded', async () => {
+      const env = await await mod.createEnvironment();
       expect(env.children.length).toBe(0);
     });
   });
@@ -117,16 +117,14 @@ describe('Environment', () => {
       });
 
       await mod.loadEnvironment();
-      const group = mod.createEnvironment();
-      await flushAsync();
+      const group = await await mod.createEnvironment();
       expect(group.children.length).toBeGreaterThan(0);
     });
 
     it('handles non-ok manifest response', async () => {
       mockFetchWith(DOODAD_PAYLOAD, null);
       await mod.loadEnvironment();
-      const group = mod.createEnvironment();
-      await flushAsync();
+      const group = await await mod.createEnvironment();
       expect(group.children.length).toBeGreaterThan(0);
     });
   });
@@ -139,20 +137,19 @@ describe('Environment', () => {
       await mod.loadEnvironment();
     });
 
-    it('returns group immediately (sync)', () => {
-      const group = mod.createEnvironment();
+    it('returns group immediately (sync)', async () => {
+      const group = await mod.createEnvironment();
       expect(group).toBeDefined();
       expect(group.children).toBeDefined();
     });
 
     it('populates group asynchronously', async () => {
-      const group = mod.createEnvironment();
-      await flushAsync();
+      const group = await mod.createEnvironment();
       expect(group.children.length).toBeGreaterThan(0);
     });
 
     it('loads GLB for models in manifest', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       const urls = mockGLTFLoad.mock.calls.map(c => c[0]);
@@ -161,7 +158,7 @@ describe('Environment', () => {
     });
 
     it('creates InstancedMesh with correct instance count', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // oak has 2 instances in manifest → InstancedMesh with count=2
@@ -180,7 +177,7 @@ describe('Environment', () => {
         }
       });
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // oak → 2 mesh parts, each with count=2
@@ -189,7 +186,7 @@ describe('Environment', () => {
     });
 
     it('sets instanceMatrix.needsUpdate after populating', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       const instanced = group.children.find(c => c.count === 2);
@@ -198,7 +195,7 @@ describe('Environment', () => {
     });
 
     it('writes position data into instance matrices', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       const instanced = group.children.find(c => c.count === 2);
@@ -208,7 +205,7 @@ describe('Environment', () => {
     });
 
     it('uses fallback placeholder when model not in manifest', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // boulder.m2 not in manifest → fallback InstancedMesh with count=1
@@ -221,7 +218,7 @@ describe('Environment', () => {
         onError(new Error('Load failed'));
       });
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // All models should fall back to placeholders
@@ -231,7 +228,7 @@ describe('Environment', () => {
     });
 
     it('places WMO from manifest as cloned scene', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // WMO clone is a Group (not InstancedMesh)
@@ -242,7 +239,7 @@ describe('Environment', () => {
     });
 
     it('sets shadow on WMO mesh children', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       const wmoChild = group.children.find(
@@ -266,7 +263,7 @@ describe('Environment', () => {
         }
       });
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // WMO fallback is a Mesh (box), not a Group clone
@@ -290,7 +287,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // Verify that the InstancedMesh exists and has matrix data
@@ -311,8 +308,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
-      await flushAsync();
+      const group = await mod.createEnvironment();
       expect(group.children.length).toBeGreaterThan(0);
     });
 
@@ -327,7 +323,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       const mesh = group.children.find(c => c.count === 1);
@@ -344,7 +340,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // Should still create mesh without errors
@@ -361,7 +357,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // WMO should be placed as fallback box
@@ -385,7 +381,7 @@ describe('Environment', () => {
       mockFetchWith(data, manifest);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // WMO should be cloned from GLB
@@ -408,7 +404,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       // Only near doodad → 1 InstancedMesh
@@ -425,8 +421,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
-      await flushAsync();
+      const group = await mod.createEnvironment();
       expect(group.children.length).toBe(0);
     });
 
@@ -440,8 +435,7 @@ describe('Environment', () => {
       mockFetchWith(data, null);
       await mod.loadEnvironment();
 
-      const group = mod.createEnvironment();
-      await flushAsync();
+      const group = await mod.createEnvironment();
       expect(group.children.length).toBe(0);
     });
   });
@@ -465,14 +459,14 @@ describe('Environment', () => {
     });
 
     it('creates one InstancedMesh per unique model', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
       // 5 unique models, each with 1 instance → 5 InstancedMeshes
       expect(group.children.length).toBe(5);
     });
 
     it('all fallback meshes cast and receive shadows', async () => {
-      const group = mod.createEnvironment();
+      const group = await mod.createEnvironment();
       await flushAsync();
 
       for (const child of group.children) {

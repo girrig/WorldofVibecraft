@@ -81,6 +81,12 @@ export class Group {
     e[12] = this.position.x; e[13] = this.position.y; e[14] = this.position.z;
     e[15] = 1;
   }
+  updateMatrixWorld(force) {
+    this.updateMatrix();
+    for (const child of this.children) {
+      if (child.updateMatrixWorld) child.updateMatrixWorld(force);
+    }
+  }
   clone() {
     const cloned = new Group();
     cloned.position.copy(this.position);
@@ -329,6 +335,7 @@ export class WebGLRenderer {
   setSize() {}
   setPixelRatio() {}
   render() {}
+  compile() {}
 }
 
 // PerspectiveCamera

@@ -23,6 +23,72 @@ export async function loadEnvironment() {
   }
 }
 
+/**
+ * Preload ALL doodad and WMO models to completely eliminate lag spikes.
+ * @param {Function} onProgress - Callback(percent, status) called with progress updates
+ * @returns {Promise<void>}
+ */
+export function preloadEnvironmentModels(onProgress) {
+  if (!manifest || !doodadData) {
+    console.warn('loadEnvironment() must be called before preloadEnvironmentModels()');
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    // Collect all unique model paths from the manifest
+    const allModels = [];
+
+    // Add all doodad models
+    if (manifest.models) {
+      for (const [modelPath, info] of Object.entries(manifest.models)) {
+        if (info.glb) {
+          allModels.push({ type: 'doodad', glb: info.glb, path: modelPath });
+        }
+      }
+    }
+
+    // Add all WMO models
+    if (manifest.wmos) {
+      for (const [wmoPath, info] of Object.entries(manifest.wmos)) {
+        if (info.glb) {
+          allModels.push({ type: 'wmo', glb: info.glb, path: wmoPath });
+        }
+      }
+    }
+
+    const total = allModels.length;
+    let loaded = 0;
+
+    if (total === 0) {
+      resolve();
+      return;
+    }
+
+    const promises = allModels.map((model) => {
+      const url = '/assets/models/' + model.glb;
+      return loadGLB(url)
+        .then(() => {
+          loaded++;
+          if (onProgress) {
+            const percent = Math.round((loaded / total) * 100);
+            const modelName = model.glb.split('/').pop().replace('.glb', '');
+            onProgress(percent, modelName);
+          }
+        })
+        .catch((err) => {
+          console.warn(`Failed to preload ${model.glb}:`, err);
+          loaded++;
+          if (onProgress) {
+            const percent = Math.round((loaded / total) * 100);
+            onProgress(percent, 'error');
+          }
+        });
+    });
+
+    Promise.all(promises).then(() => resolve());
+  });
+}
+
 // ── GLB loader with caching ──
 
 function loadGLB(url) {
@@ -239,30 +305,26 @@ async function populateEnvironment(group) {
     byModel[d.model].push(d);
   }
 
-  // Load models in parallel batches of 10
-  const entries = Object.entries(byModel);
-  for (let i = 0; i < entries.length; i += 10) {
-    const batch = entries.slice(i, i + 10);
-    await Promise.all(batch.map(([modelPath, instances]) =>
-      loadAndPlaceModel(group, modelPath, instances)
-    ));
+  // Place all doodads (models are already preloaded, so this is instant)
+  for (const [modelPath, instances] of Object.entries(byModel)) {
+    loadAndPlaceModel(group, modelPath, instances);
   }
 
-  // WMOs
+  // Place all WMOs (also preloaded)
   for (const wmo of doodadData.wmos) {
-    await loadAndPlaceWMO(group, wmo);
+    loadAndPlaceWMO(group, wmo);
   }
 }
 
 /**
- * Create environment group. Returns immediately with an empty group,
- * then asynchronously populates it with loaded GLB models (or fallback placeholders).
+ * Create environment group and wait for it to be fully populated.
+ * All models are preloaded, so population is instant.
  */
-export function createEnvironment() {
+export async function createEnvironment() {
   const group = new THREE.Group();
   if (!doodadData) return group;
 
-  populateEnvironment(group).catch((err) =>
+  await populateEnvironment(group).catch((err) =>
     console.warn('Environment population error:', err)
   );
 

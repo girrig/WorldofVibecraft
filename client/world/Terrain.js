@@ -7,6 +7,9 @@ let centerHeight = 0;    // height at grid center, used as Y=0 reference
 const CENTER_COL = 192;  // middle of 385-wide grid
 const CENTER_ROW = 192;
 
+// Texture cache for preloaded textures
+const textureCache = new Map();
+
 /**
  * Async loader — call before createTerrain().
  * Fetches the heightmap binary + meta JSON produced by extract_terrain.py.
@@ -24,6 +27,68 @@ export async function loadTerrain() {
   // Use the height at grid center as Y=0 reference
   const ci = CENTER_ROW * meta.gridWidth + CENTER_COL;
   centerHeight = heightData[ci] || 0;
+}
+
+/**
+ * Preload all terrain textures with progress tracking.
+ * @param {Function} onProgress - Callback(percent) called with 0-100 percent complete
+ * @returns {Promise<void>}
+ */
+export function preloadTerrainTextures(onProgress) {
+  if (!meta) {
+    console.warn('loadTerrain() must be called before preloadTerrainTextures()');
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const tilesX = meta.tiles.countX;  // 3
+    const tilesY = meta.tiles.countY;  // 3
+    const totalTextures = tilesX * tilesY; // 9
+
+    const loader = new THREE.TextureLoader();
+    let loaded = 0;
+
+    const promises = [];
+
+    for (let tileRow = 0; tileRow < tilesY; tileRow++) {
+      for (let tileCol = 0; tileCol < tilesX; tileCol++) {
+        const texIdx = tileRow * tilesX + tileCol;
+        const url = `/assets/terrain/northshire_tex_${texIdx}.webp`;
+
+        const promise = new Promise((resolveTexture, rejectTexture) => {
+          loader.load(
+            url,
+            (texture) => {
+              // Configure texture
+              texture.wrapS = THREE.ClampToEdgeWrapping;
+              texture.wrapT = THREE.ClampToEdgeWrapping;
+              texture.minFilter = THREE.LinearMipmapLinearFilter;
+              texture.colorSpace = THREE.SRGBColorSpace;
+
+              // Cache it
+              textureCache.set(texIdx, texture);
+
+              loaded++;
+              if (onProgress) onProgress(Math.round((loaded / totalTextures) * 100));
+
+              resolveTexture();
+            },
+            undefined,
+            (err) => {
+              console.error(`Failed to load texture ${url}:`, err);
+              rejectTexture(err);
+            }
+          );
+        });
+
+        promises.push(promise);
+      }
+    }
+
+    Promise.all(promises)
+      .then(() => resolve())
+      .catch((err) => reject(err));
+  });
 }
 
 /**
@@ -107,15 +172,20 @@ function createTileMesh(tileRow, tileCol) {
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
 
-  // Texture
+  // Texture - use preloaded texture from cache or load on-demand
   const texIdx = tileRow * meta.tiles.countX + tileCol;
-  const texture = new THREE.TextureLoader().load(
-    `/assets/terrain/northshire_tex_${texIdx}.png`
-  );
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.colorSpace = THREE.SRGBColorSpace;
+  let texture = textureCache.get(texIdx);
+
+  if (!texture) {
+    // Fallback: load on-demand if not preloaded
+    texture = new THREE.TextureLoader().load(
+      `/assets/terrain/northshire_tex_${texIdx}.webp`
+    );
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
 
   const material = new THREE.MeshStandardMaterial({
     map: texture,

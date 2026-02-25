@@ -19,7 +19,7 @@ import json
 import math
 import numpy as np
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageFilter
 import io
 
 SCRIPT_DIR = Path(__file__).parent
@@ -503,8 +503,8 @@ def bake_tile_texture(chunks_grid, mtex_list, archive_pool, mphd_flags,
             try:
                 img = Image.open(io.BytesIO(blp_data)).convert("RGBA")
                 # Tile the texture and resize to chunk resolution
-                # Terrain textures repeat ~4 times per chunk visually
-                repeats = 4
+                # Terrain textures repeat ~8 times per chunk visually for detail
+                repeats = 8
                 big_w = img.width * repeats
                 big_h = img.height * repeats
                 big = Image.new("RGBA", (big_w, big_h))
@@ -562,10 +562,13 @@ def bake_tile_texture(chunks_grid, mtex_list, archive_pool, mphd_flags,
                 if alpha_64 is None:
                     continue
 
-                # Resize alpha to chunk pixel size
+                # Resize alpha to chunk pixel size with bicubic for smoother blending
                 alpha_img = Image.fromarray(alpha_64).resize(
-                    (chunk_px, chunk_px), Image.LANCZOS
+                    (chunk_px, chunk_px), Image.Resampling.BICUBIC
                 )
+                # Apply slight blur to reduce blockiness
+                from PIL import ImageFilter
+                alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.5))
 
                 # Alpha-composite
                 overlay_copy = overlay.copy()
@@ -1039,8 +1042,8 @@ def main():
                 chunks_grid, mtex_list, archive_pool, mphd_flags
             )
 
-            tex_path = output_dir / f"northshire_tex_{tex_idx}.png"
-            tile_img.save(str(tex_path), "PNG")
+            tex_path = output_dir / f"northshire_tex_{tex_idx}.webp"
+            tile_img.save(str(tex_path), "WEBP", quality=75, method=6)
             print(f"    -> {tex_path} ({tile_img.size[0]}x{tile_img.size[1]})")
             tex_idx += 1
 

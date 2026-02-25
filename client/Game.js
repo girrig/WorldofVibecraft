@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { MSG, SPAWN_AREA, SPAWN_POINT } from '../shared/constants.js';
-import { createTerrain, loadTerrain } from './world/Terrain.js';
-import { createEnvironment, loadEnvironment, createLighting, createSky } from './world/Environment.js';
+import { createTerrain } from './world/Terrain.js';
+import { createEnvironment, createLighting, createSky } from './world/Environment.js';
 import { LocalPlayer } from './entities/Player.js';
-import { preloadPlayerModel } from './entities/PlayerModel.js';
 import { RemotePlayer } from './entities/RemotePlayer.js';
 import { PlayerControls } from './controls/PlayerControls.js';
 import { NetworkClient } from './network.js';
@@ -34,19 +33,12 @@ export class Game {
     // Initialize rendering
     this.initRenderer();
 
-    // Preload terrain + environment + player model in parallel
-    await Promise.all([
-      loadTerrain().catch((err) => console.warn('Terrain load failed, using fallback:', err)),
-      loadEnvironment().catch((err) => console.warn('Doodad load failed, skipping:', err)),
-      preloadPlayerModel().catch((err) => console.warn('Model load failed, using fallback:', err)),
-    ]);
-
-    // Connect to server
+    // Assets are already preloaded by main.js - just connect to server
     this.network = new NetworkClient();
     const welcomeData = await this.network.connect(name);
 
-    // Initialize game world
-    this.initGame(welcomeData, name);
+    // Initialize game world (async now - waits for environment population)
+    await this.initGame(welcomeData, name);
 
     // Start game loop
     this.animate();
@@ -70,14 +62,19 @@ export class Game {
     });
   }
 
-  initGame(welcomeData, name) {
+  async initGame(welcomeData, name) {
     this.scene = new THREE.Scene();
 
     // World
     createSky(this.scene);
     createLighting(this.scene);
     this.scene.add(createTerrain());
-    this.scene.add(createEnvironment());
+
+    // Wait for environment to be fully populated before continuing
+    console.log('Placing environment objects...');
+    const envGroup = await createEnvironment();
+    this.scene.add(envGroup);
+    console.log('Environment ready!');
 
     // Local player
     this.localPlayer = new LocalPlayer(welcomeData.id, name);
@@ -96,6 +93,28 @@ export class Game {
     // Controls
     const canvas = document.getElementById('game-canvas');
     this.controls = new PlayerControls(this.camera, canvas);
+
+    // Force scene graph update (builds acceleration structures for raycasting)
+    this.scene.updateMatrixWorld(true);
+
+    // Position camera before shader compilation
+    this.controls.update(this.localPlayer.position, this.localPlayer.characterYaw, this.scene, this.localPlayer.mesh);
+
+    // CRITICAL: Compile all shaders AFTER environment is fully populated AND camera is positioned
+    // This prevents the "first camera spin" lag spike
+    console.log('Compiling shaders...');
+    this.renderer.compile(this.scene, this.camera);
+
+    // Render multiple times from different angles to ensure all shaders compiled
+    for (let i = 0; i < 8; i++) {
+      this.controls.cameraYaw += Math.PI / 4;
+      this.controls.update(this.localPlayer.position, this.localPlayer.characterYaw, this.scene, this.localPlayer.mesh);
+      this.renderer.render(this.scene, this.camera);
+    }
+    // Reset camera to original angle
+    this.controls.cameraYaw = 0;
+    this.controls.update(this.localPlayer.position, this.localPlayer.characterYaw, this.scene, this.localPlayer.mesh);
+    console.log('Shaders compiled!');
 
     // UI
     this.chatBox = new ChatBox(this.network);

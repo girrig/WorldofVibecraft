@@ -84,6 +84,67 @@ body {
   box-shadow: 0 0 15px rgba(201, 170, 113, 0.4);
 }
 
+/* Loading Screen */
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a0a2e 0%, #16213e 50%, #0a1628 100%);
+  z-index: 99;
+}
+
+.loading-box {
+  text-align: center;
+  padding: 40px 60px;
+  border: 2px solid #c9aa71;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 40px rgba(201, 170, 113, 0.3);
+  min-width: 400px;
+}
+
+.loading-box h1 {
+  font-size: 42px;
+  color: #c9aa71;
+  text-shadow: 0 0 20px rgba(201, 170, 113, 0.5);
+  margin-bottom: 8px;
+}
+
+.loading-box p {
+  color: #8899aa;
+  margin-bottom: 16px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.loading-bar-container {
+  width: 100%;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid #c9aa71;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.loading-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #c9aa71 0%, #e8d5a3 50%, #c9aa71 100%);
+  transition: width 0.3s ease;
+  box-shadow: 0 0 10px rgba(201, 170, 113, 0.5);
+}
+
+#loading-percent {
+  color: #c9aa71;
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 0;
+}
+
 /* Game Canvas */
 #game-canvas {
   display: block;
