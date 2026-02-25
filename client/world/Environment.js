@@ -93,7 +93,13 @@ function placeFallbackInstances(group, instances) {
     const terrainY = getTerrainHeight(d.x, d.z);
     const y = terrainY + shape.yOffset * (d.scale || 1.0);
     dummy.position.set(d.x, y, d.z);
-    dummy.rotation.set(0, (d.rotY || 0) * Math.PI / 180, 0);
+    // Apply all three rotation axes (YZX order per wowdev.wiki)
+    dummy.rotation.set(
+      (d.rotX || 0) * Math.PI / 180,
+      (d.rotY || 0) * Math.PI / 180,
+      (d.rotZ || 0) * Math.PI / 180,
+      'YZX'
+    );
     dummy.scale.setScalar(d.scale || 1.0);
     dummy.updateMatrix();
     mesh.setMatrixAt(i, dummy.matrix);
@@ -118,7 +124,13 @@ function placeWMOFallback(group, wmo) {
   const mesh = new THREE.Mesh(geom, mat);
   const terrainY = getTerrainHeight(wmo.x, wmo.z);
   mesh.position.set(wmo.x, terrainY + sy / 2, wmo.z);
-  mesh.rotation.set(0, (wmo.rotY || 0) * Math.PI / 180, 0);
+  // Apply all three rotation axes (YZX order per wowdev.wiki)
+  mesh.rotation.set(
+    (wmo.rotX || 0) * Math.PI / 180,
+    (wmo.rotY || 0) * Math.PI / 180,
+    (wmo.rotZ || 0) * Math.PI / 180,
+    'YZX'
+  );
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   group.add(mesh);
@@ -149,7 +161,13 @@ async function loadAndPlaceModel(group, modelPath, instances) {
           const d = instances[i];
           const terrainY = getTerrainHeight(d.x, d.z);
           dummy.position.set(d.x, terrainY, d.z);
-          dummy.rotation.set(0, (d.rotY || 0) * Math.PI / 180, 0);
+          // Apply all three rotation axes (YZX order per wowdev.wiki)
+          dummy.rotation.set(
+            (d.rotX || 0) * Math.PI / 180,
+            (d.rotY || 0) * Math.PI / 180,
+            (d.rotZ || 0) * Math.PI / 180,
+            'YZX'
+          );
           dummy.scale.setScalar(d.scale || 1.0);
           dummy.updateMatrix();
           dummy.matrix.toArray(matrices, i * 16);
@@ -188,7 +206,13 @@ async function loadAndPlaceWMO(group, wmo) {
 
       const terrainY = getTerrainHeight(wmo.x, wmo.z);
       model.position.set(wmo.x, terrainY, wmo.z);
-      model.rotation.set(0, (wmo.rotY || 0) * Math.PI / 180, 0);
+      // Apply all three rotation axes (YZX order per wowdev.wiki)
+      model.rotation.set(
+        (wmo.rotX || 0) * Math.PI / 180,
+        (wmo.rotY || 0) * Math.PI / 180,
+        (wmo.rotZ || 0) * Math.PI / 180,
+        'YZX'
+      );
       model.scale.setScalar(wmo.scale || 1.0);
       model.traverse((child) => {
         if (child.isMesh) {

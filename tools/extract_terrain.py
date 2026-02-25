@@ -16,6 +16,7 @@ import ctypes
 import struct
 import sys
 import json
+import math
 import numpy as np
 from pathlib import Path
 from PIL import Image
@@ -735,6 +736,14 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
       pos[1] -> height                             (vertical, Y-up)
       pos[2] -> wowX via (MAP_OFFSET - pos[2])   (north-south)
 
+    Rotation:
+      ADT stores rotations in DEGREES (not radians!): (rotX, rotY, rotZ)
+      In ADT Y-up coordinate system:
+        rotation[0] = pitch (rotation around X-axis)
+        rotation[1] = yaw (rotation around Y-axis, vertical)
+        rotation[2] = roll (rotation around Z-axis)
+      For Three.js Y-up rendering, apply: rotation[1] - 270 degrees
+
     Then WoW -> Three.js:
       threeX = centerWowY - wowY = center_pos[1] - MAP_OFFSET + pos[0]
       threeZ = centerWowX - wowX = center_pos[0] - MAP_OFFSET + pos[2]
@@ -760,6 +769,13 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
             three_z = ofs_z + p[2]
             three_y = p[1] - center_height
 
+            # ADT rotations are in degrees! Try raw values (no offsets):
+            # Since we're Y-up -> Y-up, no coordinate conversion needed
+            # Just use raw rotations with axis mapping
+            rot_x = entry["rotation"][2]  # Roll
+            rot_y = entry["rotation"][1]  # Yaw
+            rot_z = entry["rotation"][0]  # Pitch
+
             scale = entry["scale"] / 1024.0
             model = entry["modelPath"].lower().replace("\\", "/")
 
@@ -769,7 +785,9 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
                 "x": round(three_x, 2),
                 "y": round(three_y, 2),
                 "z": round(three_z, 2),
-                "rotY": round(entry["rotation"][1], 2),
+                "rotX": round(rot_x, 2),
+                "rotY": round(rot_y, 2),
+                "rotZ": round(rot_z, 2),
                 "scale": round(scale, 3),
                 "type": classify_doodad(model),
             })
@@ -784,6 +802,13 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
             three_x = ofs_x + p[0]
             three_z = ofs_z + p[2]
             three_y = p[1] - center_height
+
+            # ADT rotations are in degrees! Try raw values (no offsets):
+            # Since we're Y-up -> Y-up, no coordinate conversion needed
+            # Just use raw rotations with axis mapping
+            rot_x = entry["rotation"][2]  # Roll
+            rot_y = entry["rotation"][1]  # Yaw
+            rot_z = entry["rotation"][0]  # Pitch
 
             # Bounding box size from extents
             lo = entry["extentsLo"]
@@ -801,7 +826,9 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
                 "x": round(three_x, 2),
                 "y": round(three_y, 2),
                 "z": round(three_z, 2),
-                "rotY": round(entry["rotation"][1], 2),
+                "rotX": round(rot_x, 2),
+                "rotY": round(rot_y, 2),
+                "rotZ": round(rot_z, 2),
                 "scale": round(scale, 3),
                 "sizeX": round(size_x, 2),
                 "sizeY": round(size_y, 2),

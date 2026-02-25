@@ -3,7 +3,7 @@ export const TICK_INTERVAL = 1000 / TICK_RATE;
 
 export const WORLD_SIZE = 1600; // 3x3 ADT tiles, ~1600 yards per side
 export const SPAWN_AREA = 5; // Players spawn within this radius of spawn point
-export const SPAWN_POINT = { x: -51, z: 158 }; // In front of Northshire Abbey entrance
+export const SPAWN_POINT = { x: -60, z: 140 }; // Northshire Abbey courtyard (south of abbey entrance)
 
 // Movement (WoW-style)
 export const RUN_SPEED = 7; // Units per second (forward)
