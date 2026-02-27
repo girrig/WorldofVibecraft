@@ -1,104 +1,88 @@
 import * as THREE from 'three';
+import { createTerrainMaterial, createAlphaTexture, loadTerrainTexture } from './TerrainShader.js';
 
 // ── Module state (populated by loadTerrain) ──
 let heightData = null;   // Float32Array from heightmap.bin
 let meta = null;         // parsed northshire_meta.json
+let chunkData = null;    // chunk-level texture/alpha data
+let textureMapping = null; // BLP path -> WebP filename mapping
 let centerHeight = 0;    // height at grid center, used as Y=0 reference
 const CENTER_COL = 192;  // middle of 385-wide grid
 const CENTER_ROW = 192;
 
-// Texture cache for preloaded textures
-const textureCache = new Map();
+// Texture cache for loaded terrain textures
+const terrainTextureCache = new Map();
 
 /**
  * Async loader — call before createTerrain().
- * Fetches the heightmap binary + meta JSON produced by extract_terrain.py.
+ * Fetches the heightmap binary + meta JSON + chunk data produced by extract_terrain.py.
  */
 export async function loadTerrain() {
-  const [metaResp, binResp] = await Promise.all([
+  const [metaResp, binResp, chunksResp, mappingResp] = await Promise.all([
     fetch('/assets/terrain/northshire_meta.json'),
     fetch('/assets/terrain/northshire_heightmap.bin'),
+    fetch('/assets/terrain/northshire_chunks.json'),
+    fetch('/assets/terrain/texture_mapping.json'),
   ]);
 
   meta = await metaResp.json();
   const buf = await binResp.arrayBuffer();
   heightData = new Float32Array(buf);
+  chunkData = await chunksResp.json();
+  textureMapping = await mappingResp.json();
 
   // Use the height at grid center as Y=0 reference
   const ci = CENTER_ROW * meta.gridWidth + CENTER_COL;
   centerHeight = heightData[ci] || 0;
+
+  console.log(`Loaded terrain: ${chunkData.chunks.length} chunks, ${chunkData.uniqueTextures.length} textures`);
 }
 
 /**
- * Preload all terrain textures with progress tracking.
+ * Preload all unique terrain textures with progress tracking.
  * @param {Function} onProgress - Callback(percent) called with 0-100 percent complete
  * @returns {Promise<void>}
  */
-export function preloadTerrainTextures(onProgress) {
-  if (!meta) {
+export async function preloadTerrainTextures(onProgress) {
+  if (!chunkData || !textureMapping) {
     console.warn('loadTerrain() must be called before preloadTerrainTextures()');
-    return Promise.resolve();
+    return;
   }
 
-  return new Promise((resolve, reject) => {
-    const tilesX = meta.tiles.countX;  // 3
-    const tilesY = meta.tiles.countY;  // 3
-    const totalTextures = tilesX * tilesY; // 9
+  const uniqueTextures = chunkData.uniqueTextures;
+  const totalTextures = uniqueTextures.length;
+  let loaded = 0;
 
-    const loader = new THREE.TextureLoader();
-    let loaded = 0;
-
-    const promises = [];
-
-    for (let tileRow = 0; tileRow < tilesY; tileRow++) {
-      for (let tileCol = 0; tileCol < tilesX; tileCol++) {
-        const texIdx = tileRow * tilesX + tileCol;
-        const url = `/assets/terrain/northshire_tex_${texIdx}.webp`;
-
-        const promise = new Promise((resolveTexture, rejectTexture) => {
-          loader.load(
-            url,
-            (texture) => {
-              // Configure texture
-              texture.wrapS = THREE.ClampToEdgeWrapping;
-              texture.wrapT = THREE.ClampToEdgeWrapping;
-              texture.minFilter = THREE.LinearMipmapLinearFilter;
-              texture.colorSpace = THREE.SRGBColorSpace;
-
-              // Cache it
-              textureCache.set(texIdx, texture);
-
-              loaded++;
-              if (onProgress) onProgress(Math.round((loaded / totalTextures) * 100));
-
-              resolveTexture();
-            },
-            undefined,
-            (err) => {
-              console.error(`Failed to load texture ${url}:`, err);
-              rejectTexture(err);
-            }
-          );
-        });
-
-        promises.push(promise);
-      }
+  const promises = uniqueTextures.map(async (blpPath) => {
+    const webpFilename = textureMapping[blpPath];
+    if (!webpFilename) {
+      console.warn(`No mapping found for texture: ${blpPath}`);
+      return;
     }
 
-    Promise.all(promises)
-      .then(() => resolve())
-      .catch((err) => reject(err));
+    try {
+      const texture = await loadTerrainTexture(webpFilename);
+      terrainTextureCache.set(blpPath, texture);
+
+      loaded++;
+      if (onProgress) onProgress(Math.round((loaded / totalTextures) * 100));
+    } catch (err) {
+      console.error(`Failed to load texture ${blpPath} (${webpFilename}):`, err);
+    }
   });
+
+  await Promise.all(promises);
+  console.log(`Preloaded ${terrainTextureCache.size}/${totalTextures} terrain textures`);
 }
 
 /**
- * Build the terrain mesh group (9 tile meshes, one per ADT tile).
- * Must be called after loadTerrain() resolves.
+ * Build the terrain mesh group (chunk-based meshes with shader materials).
+ * Must be called after loadTerrain() and preloadTerrainTextures() resolve.
  */
 export function createTerrain() {
   const group = new THREE.Group();
 
-  if (!heightData || !meta) {
+  if (!heightData || !meta || !chunkData) {
     // Fallback: flat green plane if data didn't load
     const geo = new THREE.PlaneGeometry(1600, 1600, 8, 8);
     geo.rotateX(-Math.PI / 2);
@@ -109,32 +93,50 @@ export function createTerrain() {
     return group;
   }
 
-  const tilesX = meta.tiles.countX;  // 3
-  const tilesY = meta.tiles.countY;  // 3
-
-  for (let tileRow = 0; tileRow < tilesY; tileRow++) {
-    for (let tileCol = 0; tileCol < tilesX; tileCol++) {
-      group.add(createTileMesh(tileRow, tileCol));
+  // Create chunk meshes with shader materials
+  let chunksRendered = 0;
+  for (const chunk of chunkData.chunks) {
+    const mesh = createChunkMesh(chunk);
+    if (mesh) {
+      group.add(mesh);
+      chunksRendered++;
     }
   }
 
+  console.log(`Created ${chunksRendered} chunk meshes`);
   return group;
 }
 
 /**
- * Create one tile mesh (129x129 vertices = 128x128 quads).
+ * Create one chunk mesh (9x9 vertices = 8x8 quads).
+ * @param {Object} chunk - Chunk data from northshire_chunks.json
  */
-function createTileMesh(tileRow, tileCol) {
-  const { gridWidth, cellSize } = meta;
-  const V = 129; // vertices per axis per tile
+function createChunkMesh(chunk) {
+  const { tileX, tileY, chunkX, chunkY, layers } = chunk;
 
+  if (!layers || layers.length === 0) {
+    return null; // Skip chunks with no texture layers
+  }
+
+  const { gridWidth, cellSize } = meta;
+  const startTileX = meta.tiles.startX;
+  const startTileY = meta.tiles.startY;
+
+  // Each chunk = 8x8 quads = 9x9 vertices
+  const V = 9;
   const positions = new Float32Array(V * V * 3);
   const uvs = new Float32Array(V * V * 2);
 
+  // Calculate grid offset for this chunk
+  const tileGridCol = (tileX - startTileX) * 128;
+  const tileGridRow = (tileY - startTileY) * 128;
+  const chunkGridCol = tileGridCol + chunkX * 8;
+  const chunkGridRow = tileGridRow + chunkY * 8;
+
   for (let r = 0; r < V; r++) {
     for (let c = 0; c < V; c++) {
-      const gr = tileRow * 128 + r;
-      const gc = tileCol * 128 + c;
+      const gr = chunkGridRow + r;
+      const gc = chunkGridCol + c;
       const vi = r * V + c;
 
       // Grid -> Three.js: col = east(+X), row = south(+Z), height = Y
@@ -142,17 +144,18 @@ function createTileMesh(tileRow, tileCol) {
       positions[vi * 3 + 1] = heightData[gr * gridWidth + gc] - centerHeight; // y
       positions[vi * 3 + 2] = (gr - CENTER_ROW) * cellSize;                  // z
 
-      uvs[vi * 2]     = c / 128;
-      uvs[vi * 2 + 1] = 1 - (r / 128);  // Flip V coordinate (PIL top-left vs WebGL bottom-left)
+      // UVs are chunk-local (0-1 per chunk) for alpha map sampling
+      uvs[vi * 2]     = c / 8;
+      uvs[vi * 2 + 1] = r / 8;
     }
   }
 
-  // Two triangles per quad, 128x128 quads
-  const indexCount = 128 * 128 * 6;
+  // Two triangles per quad, 8x8 quads
+  const indexCount = 8 * 8 * 6;
   const indices = new Uint32Array(indexCount);
   let idx = 0;
-  for (let r = 0; r < 128; r++) {
-    for (let c = 0; c < 128; c++) {
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
       const a = r * V + c;
       const b = a + 1;
       const d = (r + 1) * V + c;
@@ -172,30 +175,53 @@ function createTileMesh(tileRow, tileCol) {
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
 
-  // Texture - use preloaded texture from cache or load on-demand
-  const texIdx = tileRow * meta.tiles.countX + tileCol;
-  let texture = textureCache.get(texIdx);
-
-  if (!texture) {
-    // Fallback: load on-demand if not preloaded
-    texture = new THREE.TextureLoader().load(
-      `/assets/terrain/northshire_tex_${texIdx}.webp`
-    );
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.colorSpace = THREE.SRGBColorSpace;
-  }
-
-  const material = new THREE.MeshStandardMaterial({
-    map: texture,
-    roughness: 0.9,
-    metalness: 0.0,
-  });
+  // Create shader material with texture layers
+  const material = createChunkMaterial(layers);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;
+  mesh.castShadow = false;
+
   return mesh;
+}
+
+/**
+ * Create a shader material for a chunk based on its texture layers.
+ * @param {Array} layers - Layer data from chunk
+ */
+function createChunkMaterial(layers) {
+  // Get base texture (layer 0)
+  const baseLayer = layers[0];
+  const baseTexture = terrainTextureCache.get(baseLayer.texturePath);
+
+  if (!baseTexture) {
+    console.warn(`Base texture not loaded: ${baseLayer.texturePath}`);
+    // Fallback material
+    return new THREE.MeshStandardMaterial({ color: 0x3a7d44, roughness: 0.9 });
+  }
+
+  // Get overlay textures and alpha maps (layers 1-3)
+  const overlayTextures = [];
+  const alphaMaps = [];
+
+  for (let i = 1; i < layers.length && i <= 3; i++) {
+    const layer = layers[i];
+    const texture = terrainTextureCache.get(layer.texturePath);
+
+    if (texture && layer.alphaMap) {
+      overlayTextures.push(texture);
+      alphaMaps.push(createAlphaTexture(layer.alphaMap));
+    }
+  }
+
+  // Create shader material (uses world-space positions for continuous tiling)
+  return createTerrainMaterial({
+    baseTexture,
+    overlayTextures,
+    alphaMaps,
+    textureScale: 4.0,      // Tile textures globally
+    alphaSharpening: 1.0,   // No sharpening - use raw alpha values
+  });
 }
 
 /**

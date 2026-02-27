@@ -2,7 +2,7 @@
 """
 Extract WoW 3.3.5a ADT terrain data from MPQ archives.
 
-Outputs heightmap binary + baked terrain textures for Northshire Valley.
+Outputs heightmap binary + chunk-level texture/alpha data for shader-based rendering.
 Reuses StormLib wrapper pattern from extract_model.py.
 
 Usage:
@@ -16,11 +16,9 @@ import ctypes
 import struct
 import sys
 import json
-import math
+import base64
 import numpy as np
 from pathlib import Path
-from PIL import Image, ImageFilter
-import io
 
 SCRIPT_DIR = Path(__file__).parent
 STORMLIB_DLL = SCRIPT_DIR / "stormlib" / "x64" / "StormLib.dll"
@@ -382,13 +380,13 @@ def parse_mcnk(data, data_ofs, size):
                 })
 
     # ── MCAL: Alpha map raw data ──
+    # Per wowdev.wiki: the client overrides MCAL chunk size with sizeAlpha from MCNK header
     alpha_raw = None
     if sizeAlpha > 0 and ofsAlpha > 0:
         mcal_ofs = chunk_base + ofsAlpha
         if mcal_ofs + 4 <= len(data) and data[mcal_ofs:mcal_ofs + 4][::-1] == b"MCAL":
             mcal_data_ofs = mcal_ofs + 8
-            mcal_size = struct.unpack_from("<I", data, mcal_ofs + 4)[0]
-            alpha_raw = data[mcal_data_ofs:mcal_data_ofs + mcal_size]
+            alpha_raw = data[mcal_data_ofs:mcal_data_ofs + sizeAlpha]
 
     return {
         "indexX": indexX,
@@ -405,15 +403,19 @@ def parse_mcnk(data, data_ofs, size):
 
 # ── Alpha Map Decompression ───────────────────────────────────────────────
 
-def read_alpha_map(alpha_raw, offset, layer_flags, big_alpha):
-    """Read a 64x64 alpha layer. Returns numpy uint8 array (64,64) or None."""
+def read_alpha_map(alpha_raw, offset, layer_flags, big_alpha, mcnk_flags=0):
+    """Read a 64x64 alpha layer. Returns numpy uint8 array (64,64) or None.
+
+    Based on Noggit3, WebWoWViewer, pywowlib, and wowdev.wiki/ADT/v18.
+    """
     if alpha_raw is None:
         return None
 
     compressed = bool(layer_flags & 0x200)
+    do_not_fix = bool(mcnk_flags & 0x8000)
 
     if compressed:
-        # RLE decompression
+        # RLE decompression -> 4096 bytes (8-bit, 64x64)
         result = bytearray()
         pos = offset
         while len(result) < 4096 and pos < len(alpha_raw):
@@ -430,155 +432,107 @@ def read_alpha_map(alpha_raw, offset, layer_flags, big_alpha):
                 pos = end
         if len(result) < 4096:
             result.extend([0] * (4096 - len(result)))
-        return np.frombuffer(bytes(result[:4096]), dtype=np.uint8).reshape(64, 64)
+        alpha = np.frombuffer(bytes(result[:4096]), dtype=np.uint8).reshape(64, 64)
 
     elif big_alpha:
-        # Uncompressed 64x64 = 4096 bytes
+        # Uncompressed 8-bit: 4096 bytes (64x64)
         end = offset + 4096
-        if end <= len(alpha_raw):
-            return np.frombuffer(alpha_raw[offset:end], dtype=np.uint8).reshape(64, 64)
+        if end > len(alpha_raw):
+            return None
+        alpha = np.frombuffer(alpha_raw[offset:end], dtype=np.uint8).reshape(64, 64).copy()
 
     else:
-        # Uncompressed 32x64 (half-byte packed) or 63x64
-        # Try 4096 bytes first, fall back to 2048
-        end = offset + 4096
-        if end <= len(alpha_raw):
-            return np.frombuffer(alpha_raw[offset:end], dtype=np.uint8).reshape(64, 64)
+        # Uncompressed 4-bit packed: 2048 bytes -> 64x64
+        # Each byte = 2 horizontally adjacent pixels (LSB first per wowdev.wiki)
+        # Low nibble = first pixel (even column), High nibble = second pixel (odd column)
+        # Source: Noggit3 alphamap.cpp, WebWoWViewer adtGeomCache.js, wowdev.wiki
         end = offset + 2048
-        if end <= len(alpha_raw):
-            # 4-bit packed: 2 pixels per byte
-            packed = np.frombuffer(alpha_raw[offset:end], dtype=np.uint8)
-            low = (packed & 0x0F) * 17   # scale 0-15 to 0-255
-            high = (packed >> 4) * 17
-            interleaved = np.empty(4096, dtype=np.uint8)
-            interleaved[0::2] = low
-            interleaved[1::2] = high
-            return interleaved.reshape(64, 64)
+        if end > len(alpha_raw):
+            return None
+        packed = np.frombuffer(alpha_raw[offset:end], dtype=np.uint8)
+        low = (packed & 0x0F) * 17    # First pixel of each pair (even columns)
+        high = (packed >> 4) * 17     # Second pixel of each pair (odd columns)
 
-    return None
+        # Reshape to 64 rows x 32 byte-pairs per row, interleave horizontally
+        low_2d = low.reshape(64, 32)
+        high_2d = high.reshape(64, 32)
+        alpha = np.empty((64, 64), dtype=np.uint8)
+        alpha[:, 0::2] = low_2d     # Even columns (0, 2, 4, ...)
+        alpha[:, 1::2] = high_2d    # Odd columns (1, 3, 5, ...)
+
+    # Apply "fix alpha map" when do_not_fix_alpha_map flag is NOT set.
+    # The data only has 63x63 valid values; row/column 63 is garbage.
+    # Fix by duplicating row/column 62 to 63. (Noggit3, pywowlib, wowmapviewer)
+    if not do_not_fix:
+        alpha[:, 63] = alpha[:, 62]   # Last column = second-to-last column
+        alpha[63, :] = alpha[62, :]   # Last row = second-to-last row
+
+    return alpha
 
 
-# ── Texture Baking ─────────────────────────────────────────────────────────
+# ── Terrain Chunk Data Export ─────────────────────────────────────────────
 
-def bake_tile_texture(chunks_grid, mtex_list, archive_pool, mphd_flags,
-                      chunk_px=256):
+def export_chunk_data(all_tile_data, archive_pool, mphd_flags, start_tx, start_ty):
     """
-    Bake terrain texture for one ADT tile.
-    chunks_grid: 16x16 list-of-lists of MCNK dicts (indexed [row][col]).
-    archive_pool: MPQArchivePool instance with open archives
-    Returns PIL Image of size (chunk_px*16, chunk_px*16).
+    Export chunk-level terrain data for shader-based rendering.
+    Returns dict with texture paths and alpha maps per chunk.
     """
-    tile_size = chunk_px * 16
-    tile_img = Image.new("RGBA", (tile_size, tile_size), (80, 140, 60, 255))
-
     big_alpha = bool(mphd_flags & 0x4)
-    texture_cache = {}
+    chunks_data = []
+    unique_textures = set()
 
-    def get_texture(tex_path_orig):
-        if tex_path_orig in texture_cache:
-            return texture_cache[tex_path_orig]
-
-        # MPQ paths need backslashes, and terrain textures might need TEXTURES\ prefix
-        # Try multiple path formats to find the texture
-        tex_path = tex_path_orig.replace("/", "\\")
-
-        # Try with TEXTURES\ prefix first
-        tex_paths_to_try = [
-            f"TEXTURES\\{tex_path}",
-            tex_path,  # without prefix
-            tex_path_orig,  # original with forward slashes
-        ]
-
-        # Try each path variant until one works
-        blp_data = None
-        successful_path = None
-
-        for try_path in tex_paths_to_try:
-            blp_data = archive_pool.read_file(try_path)
-            if blp_data:
-                successful_path = try_path
-                break
-
-        if blp_data:
-            try:
-                img = Image.open(io.BytesIO(blp_data)).convert("RGBA")
-                # Tile the texture and resize to chunk resolution
-                # Terrain textures repeat ~8 times per chunk visually for detail
-                repeats = 8
-                big_w = img.width * repeats
-                big_h = img.height * repeats
-                big = Image.new("RGBA", (big_w, big_h))
-                for i in range(repeats):
-                    for j in range(repeats):
-                        big.paste(img, (i * img.width, j * img.height))
-                resized = big.resize((chunk_px, chunk_px), Image.LANCZOS)
-                texture_cache[tex_path_orig] = resized
-                print(f"    [OK] Loaded: {successful_path} ({img.width}x{img.height})")
-                return resized
-            except Exception as e:
-                print(f"    [ERROR] Failed to decode BLP: {successful_path}: {e}")
-        else:
-            print(f"    [FAIL] Not found (tried {len(tex_paths_to_try)} paths): {tex_path_orig}")
-
-        texture_cache[tex_path_orig] = None
-        return None
-
-    for row in range(16):
-        for col in range(16):
-            chunk = chunks_grid[row][col]
-            if chunk is None:
-                continue
-
+    for (tx, ty), (mtex_list, mcnk_list, _, _) in all_tile_data.items():
+        for chunk in mcnk_list:
             layers = chunk["layers"]
             if not layers:
                 continue
 
-            # Layer 0: opaque base
-            tex_idx = layers[0]["textureId"]
-            tex_path = mtex_list[tex_idx] if tex_idx < len(mtex_list) else None
-            base_tex = get_texture(tex_path) if tex_path else None
-
-            if base_tex:
-                chunk_img = base_tex.copy()
-            else:
-                chunk_img = Image.new("RGBA", (chunk_px, chunk_px), (80, 140, 60, 255))
-
-            # Layers 1+: alpha-blended overlays
-            for li in range(1, len(layers)):
-                layer = layers[li]
+            chunk_layers = []
+            for li, layer in enumerate(layers):
                 tex_idx = layer["textureId"]
                 tex_path = mtex_list[tex_idx] if tex_idx < len(mtex_list) else None
+
                 if tex_path is None:
                     continue
 
-                overlay = get_texture(tex_path)
-                if overlay is None:
-                    continue
+                # Normalize path (forward slashes, lowercase)
+                tex_path_normalized = tex_path.replace("\\", "/").lower()
+                unique_textures.add(tex_path_normalized)
 
-                # Read alpha map
-                alpha_64 = read_alpha_map(
-                    chunk["alphaRaw"], layer["alphaOffset"], layer["flags"], big_alpha
-                )
-                if alpha_64 is None:
-                    continue
+                layer_data = {
+                    "textureId": tex_idx,
+                    "texturePath": tex_path_normalized,
+                }
 
-                # Resize alpha to chunk pixel size with bicubic for smoother blending
-                alpha_img = Image.fromarray(alpha_64).resize(
-                    (chunk_px, chunk_px), Image.Resampling.BICUBIC
-                )
-                # Apply slight blur to reduce blockiness
-                from PIL import ImageFilter
-                alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.5))
+                # Extract alpha map for layers 1+ (layer 0 is opaque base)
+                if li > 0:
+                    alpha_64 = read_alpha_map(
+                        chunk["alphaRaw"], layer["alphaOffset"],
+                        layer["flags"], big_alpha, chunk["flags"]
+                    )
+                    if alpha_64 is not None:
+                        # Use alpha map data as-is (no transformation)
+                        # Store as base64-encoded string for JSON
+                        import base64
+                        alpha_bytes = alpha_64.tobytes()
+                        layer_data["alphaMap"] = base64.b64encode(alpha_bytes).decode("ascii")
+                        layer_data["alphaSize"] = 64  # 64x64
 
-                # Alpha-composite
-                overlay_copy = overlay.copy()
-                overlay_copy.putalpha(alpha_img)
-                chunk_img = Image.alpha_composite(chunk_img, overlay_copy)
+                chunk_layers.append(layer_data)
 
-            # Paste into tile texture
-            tile_img.paste(chunk_img, (col * chunk_px, row * chunk_px))
+            if chunk_layers:
+                chunks_data.append({
+                    "tileX": tx,
+                    "tileY": ty,
+                    "chunkX": chunk["indexX"],
+                    "chunkY": chunk["indexY"],
+                    "layers": chunk_layers,
+                })
 
-    return tile_img.convert("RGB")
+    return {
+        "chunks": chunks_data,
+        "uniqueTextures": sorted(list(unique_textures)),
+    }
 
 
 # ── Heightmap Grid ─────────────────────────────────────────────────────────
@@ -1018,34 +972,21 @@ def main():
         json.dump(meta, f, indent=2)
     print(f"  Meta: {meta_path}")
 
-    # ── Step 7: Bake terrain textures ──
-    print(f"\n== Baking terrain textures ==")
-    tex_idx = 0
-    for ty in range(start_ty, start_ty + num_ty):
-        for tx in range(start_tx, start_tx + num_tx):
-            if (tx, ty) not in all_tile_data:
-                tex_idx += 1
-                continue
+    # ── Step 7: Export chunk terrain data for shader-based rendering ──
+    print(f"\n== Exporting chunk terrain data ==")
+    chunk_data = export_chunk_data(all_tile_data, archive_pool, mphd_flags, start_tx, start_ty)
 
-            print(f"  Baking texture for tile ({tx}, {ty})...")
-            mtex_list, mcnk_list, _, _ = all_tile_data[(tx, ty)]
+    chunk_data_path = output_dir / "northshire_chunks.json"
+    with open(chunk_data_path, "w") as f:
+        json.dump(chunk_data, f, indent=2)
+    print(f"  Chunks: {len(chunk_data['chunks'])}")
+    print(f"  Unique textures: {len(chunk_data['uniqueTextures'])}")
+    print(f"  Output: {chunk_data_path}")
 
-            # Organize chunks into 16x16 grid
-            chunks_grid = [[None] * 16 for _ in range(16)]
-            for chunk in mcnk_list:
-                row = chunk["indexY"]
-                col = chunk["indexX"]
-                if 0 <= row < 16 and 0 <= col < 16:
-                    chunks_grid[row][col] = chunk
-
-            tile_img = bake_tile_texture(
-                chunks_grid, mtex_list, archive_pool, mphd_flags
-            )
-
-            tex_path = output_dir / f"northshire_tex_{tex_idx}.webp"
-            tile_img.save(str(tex_path), "WEBP", quality=75, method=6)
-            print(f"    -> {tex_path} ({tile_img.size[0]}x{tile_img.size[1]})")
-            tex_idx += 1
+    if chunk_data['uniqueTextures']:
+        print(f"  Sample textures:")
+        for tex in chunk_data['uniqueTextures'][:5]:
+            print(f"    {tex}")
 
     # ── Step 8: Build and write doodad/WMO placement JSON ──
     print(f"\n== Building doodad placement data ==")

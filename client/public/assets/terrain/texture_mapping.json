@@ -1,0 +1,20 @@
+{
+  "tileset/aerie peaks/aeriepeaksrockroadbase.blp": "aerie peaks_aeriepeaksrockroadbase.webp",
+  "tileset/aerie peaks/aeriepeaksscrubbrushbase.blp": "aerie peaks_aeriepeaksscrubbrushbase.webp",
+  "tileset/aerie peaks/aeriepeakstrolltile.blp": "aerie peaks_aeriepeakstrolltile.webp",
+  "tileset/burningstepps/burningsteppsash01.blp": "burningstepps_burningsteppsash01.webp",
+  "tileset/burningstepps/burningsteppsashcracks.blp": "burningstepps_burningsteppsashcracks.webp",
+  "tileset/burningstepps/burningsteppscharcoal01.blp": "burningstepps_burningsteppscharcoal01.webp",
+  "tileset/burningstepps/burningsteppslavatest02.blp": "burningstepps_burningsteppslavatest02.webp",
+  "tileset/burningstepps/burningsteppsrock01.blp": "burningstepps_burningsteppsrock01.webp",
+  "tileset/burningstepps/burningsteppsspireroad01.blp": "burningstepps_burningsteppsspireroad01.webp",
+  "tileset/elwynn/elwynncobblestonebase.blp": "elwynn_elwynncobblestonebase.webp",
+  "tileset/elwynn/elwynncrop92.blp": "elwynn_elwynncrop92.webp",
+  "tileset/elwynn/elwynndirtbase2.blp": "elwynn_elwynndirtbase2.webp",
+  "tileset/elwynn/elwynnflowerbase.blp": "elwynn_elwynnflowerbase.webp",
+  "tileset/elwynn/elwynngrassbase.blp": "elwynn_elwynngrassbase.webp",
+  "tileset/elwynn/elwynnrockbasetest2.blp": "elwynn_elwynnrockbasetest2.webp",
+  "tileset/the badlands/badlandsrockred.blp": "the badlands_badlandsrockred.webp",
+  "tileset/the blasted lands/blastedlandsblack.blp": "the blasted lands_blastedlandsblack.webp",
+  "tileset/wetlands/wetlandsdirtmoss01.blp": "wetlands_wetlandsdirtmoss01.webp"
+}
