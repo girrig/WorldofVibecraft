@@ -296,40 +296,6 @@ describe('Environment', () => {
       expect(mesh.instanceMatrix.array.length).toBe(16); // 4x4 matrix
     });
 
-    it('applies rotation in YZX order', async () => {
-      // This is verified by the rotation.set calls in Environment.js
-      // The test ensures the structure exists
-      const data = {
-        doodads: [
-          { model: 'tree.m2', x: 10, y: 5.0, z: 20, rotX: 0, rotY: 90, rotZ: 0, type: 'vegetation' },
-        ],
-        wmos: [],
-      };
-      mockFetchWith(data, null);
-      await mod.loadEnvironment();
-
-      const group = await mod.createEnvironment();
-      expect(group.children.length).toBeGreaterThan(0);
-    });
-
-    it('converts degrees to radians for Three.js', async () => {
-      // Environment.js converts (d.rotX || 0) * Math.PI / 180
-      const data = {
-        doodads: [
-          { model: 'prop.m2', x: 0, y: 5.0, z: 0, rotX: 90, rotY: 180, rotZ: 270, type: 'prop' },
-        ],
-        wmos: [],
-      };
-      mockFetchWith(data, null);
-      await mod.loadEnvironment();
-
-      const group = await mod.createEnvironment();
-      await flushAsync();
-
-      const mesh = group.children.find(c => c.count === 1);
-      expect(mesh).toBeDefined();
-    });
-
     it('handles missing rotation values with defaults', async () => {
       const data = {
         doodads: [
@@ -347,11 +313,11 @@ describe('Environment', () => {
       expect(group.children.length).toBe(1);
     });
 
-    it('applies three-axis rotation to WMOs', async () => {
+    it('negates rotZ on fallback WMO (wowdev wiki MDDF spec)', async () => {
       const data = {
         doodads: [],
         wmos: [
-          { model: 'building.wmo', x: 0, y: 5.0, z: 0, rotX: 0, rotY: 158.5, rotZ: 0, sizeX: 10, sizeY: 8, sizeZ: 10 },
+          { model: 'building.wmo', x: 0, y: 5.0, z: 0, rotX: 10, rotY: 158.5, rotZ: 25, sizeX: 10, sizeY: 8, sizeZ: 10 },
         ],
       };
       mockFetchWith(data, null);
@@ -360,12 +326,16 @@ describe('Environment', () => {
       const group = await mod.createEnvironment();
       await flushAsync();
 
-      // WMO should be placed as fallback box
       const wmo = group.children.find(c => c.isMesh);
       expect(wmo).toBeDefined();
+      // rotX and rotY should be positive (converted to radians)
+      expect(wmo.rotation.x).toBeCloseTo(10 * Math.PI / 180, 5);
+      expect(wmo.rotation.y).toBeCloseTo(158.5 * Math.PI / 180, 5);
+      // rotZ must be NEGATED per wowdev wiki
+      expect(wmo.rotation.z).toBeCloseTo(-25 * Math.PI / 180, 5);
     });
 
-    it('applies rotation to WMO models from manifest', async () => {
+    it('negates rotZ on GLB WMO model (wowdev wiki MDDF spec)', async () => {
       const data = {
         doodads: [],
         wmos: [
@@ -384,9 +354,76 @@ describe('Environment', () => {
       const group = await mod.createEnvironment();
       await flushAsync();
 
-      // WMO should be cloned from GLB
-      const wmo = group.children.find(c => c.children !== undefined);
+      // WMO should be cloned from GLB (a Group, not InstancedMesh)
+      const wmo = group.children.find(c => c.children !== undefined && c.count === undefined);
       expect(wmo).toBeDefined();
+      expect(wmo.rotation.x).toBeCloseTo(5 * Math.PI / 180, 5);
+      expect(wmo.rotation.y).toBeCloseTo(270 * Math.PI / 180, 5);
+      // rotZ must be NEGATED per wowdev wiki
+      expect(wmo.rotation.z).toBeCloseTo(15 * Math.PI / 180, 5);
+    });
+
+    it('uses YZX Euler order for all placements', async () => {
+      const data = {
+        doodads: [],
+        wmos: [
+          { model: 'building.wmo', x: 0, y: 5.0, z: 0, rotX: 10, rotY: 45, rotZ: 5, sizeX: 10, sizeY: 8, sizeZ: 10 },
+        ],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = await mod.createEnvironment();
+      await flushAsync();
+
+      const wmo = group.children.find(c => c.isMesh);
+      expect(wmo).toBeDefined();
+      expect(wmo.rotation.order).toBe('YZX');
+    });
+
+    it('converts degrees to radians for Three.js', async () => {
+      const data = {
+        doodads: [],
+        wmos: [
+          { model: 'box.wmo', x: 0, y: 5.0, z: 0, rotX: 90, rotY: 180, rotZ: 0, sizeX: 5, sizeY: 5, sizeZ: 5 },
+        ],
+      };
+      mockFetchWith(data, null);
+      await mod.loadEnvironment();
+
+      const group = await mod.createEnvironment();
+      await flushAsync();
+
+      const wmo = group.children.find(c => c.isMesh);
+      expect(wmo).toBeDefined();
+      expect(wmo.rotation.x).toBeCloseTo(Math.PI / 2, 5);
+      expect(wmo.rotation.y).toBeCloseTo(Math.PI, 5);
+    });
+
+    it('negates rotZ consistently across fallback and GLB doodad paths', async () => {
+      // Two separate models: one with manifest (GLB path), one without (fallback path)
+      // Both should negate rotZ identically
+      const data = {
+        doodads: [
+          { model: 'trees/oak.m2', x: 10, y: 5.0, z: 20, rotX: 0, rotY: 45, rotZ: 12, scale: 1.0, type: 'vegetation' },
+          { model: 'rocks/boulder.m2', x: -5, y: 5.0, z: 15, rotX: 0, rotY: 0, rotZ: 12, scale: 1.0, type: 'rock' },
+        ],
+        wmos: [],
+      };
+      const manifest = {
+        models: {
+          'trees/oak.m2': { glb: 'doodads/oak.glb' },
+        },
+        wmos: {},
+      };
+      mockFetchWith(data, manifest);
+      await mod.loadEnvironment();
+
+      const group = await mod.createEnvironment();
+      await flushAsync();
+
+      // Both paths should produce meshes without errors
+      expect(group.children.length).toBeGreaterThanOrEqual(2);
     });
   });
 

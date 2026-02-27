@@ -157,11 +157,10 @@ function placeFallbackInstances(group, instances) {
     const d = instances[i];
     // Use Y coordinate from ADT data directly (already at correct height)
     dummy.position.set(d.x, d.y, d.z);
-    // Apply all three rotation axes (YZX order per wowdev.wiki)
     dummy.rotation.set(
       (d.rotX || 0) * Math.PI / 180,
       (d.rotY || 0) * Math.PI / 180,
-      (d.rotZ || 0) * Math.PI / 180,
+      -(d.rotZ || 0) * Math.PI / 180,
       'YZX'
     );
     dummy.scale.setScalar(d.scale || 1.0);
@@ -188,11 +187,10 @@ function placeWMOFallback(group, wmo) {
   const mesh = new THREE.Mesh(geom, mat);
   // Use Y coordinate from ADT data directly (already at correct height)
   mesh.position.set(wmo.x, wmo.y, wmo.z);
-  // Apply all three rotation axes (YZX order per wowdev.wiki)
   mesh.rotation.set(
     (wmo.rotX || 0) * Math.PI / 180,
     (wmo.rotY || 0) * Math.PI / 180,
-    (wmo.rotZ || 0) * Math.PI / 180,
+    -(wmo.rotZ || 0) * Math.PI / 180,
     'YZX'
   );
   mesh.castShadow = true;
@@ -225,11 +223,10 @@ async function loadAndPlaceModel(group, modelPath, instances) {
           const d = instances[i];
           // Use Y coordinate from ADT data (more accurate than terrain mesh)
           dummy.position.set(d.x, d.y, d.z);
-          // Apply all three rotation axes (YZX order per wowdev.wiki)
           dummy.rotation.set(
             (d.rotX || 0) * Math.PI / 180,
             (d.rotY || 0) * Math.PI / 180,
-            (d.rotZ || 0) * Math.PI / 180,
+            -(d.rotZ || 0) * Math.PI / 180,
             'YZX'
           );
           dummy.scale.setScalar(d.scale || 1.0);
@@ -270,11 +267,10 @@ async function loadAndPlaceWMO(group, wmo) {
 
       // Use Y coordinate from ADT data (more accurate than terrain mesh)
       model.position.set(wmo.x, wmo.y, wmo.z);
-      // Apply all three rotation axes (YZX order per wowdev.wiki)
       model.rotation.set(
         (wmo.rotX || 0) * Math.PI / 180,
         (wmo.rotY || 0) * Math.PI / 180,
-        (wmo.rotZ || 0) * Math.PI / 180,
+        -(wmo.rotZ || 0) * Math.PI / 180,
         'YZX'
       );
       model.scale.setScalar(wmo.scale || 1.0);

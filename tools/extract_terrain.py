@@ -699,7 +699,7 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
         rotation[0] = pitch (rotation around X-axis)
         rotation[1] = yaw (rotation around Y-axis, vertical)
         rotation[2] = roll (rotation around Z-axis)
-      For Three.js Y-up rendering, apply: rotation[1] - 270 degrees
+      For Three.js Y-up rendering, apply: rotation[1] - 90 degrees (model offset)
 
     Then WoW -> Three.js:
       threeX = centerWowY - wowY = center_pos[1] - MAP_OFFSET + pos[0]
@@ -726,12 +726,12 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
             three_z = ofs_z + p[2]
             three_y = p[1] - center_height
 
-            # ADT rotations are in degrees!
-            # Models were converted from Z-up to Y-up, adjustments needed:
-            # - Yaw: -90° offset for coordinate system conversion
-            rot_x = entry["rotation"][2]  # Roll
-            rot_y = entry["rotation"][1] - 90.0  # Yaw (coordinate system offset)
-            rot_z = entry["rotation"][0]  # Pitch
+            # ADT rotations are in degrees (wowdev wiki MDDF reference)
+            # rotation[0] = around N/S axis (Z), rotation[1] = around Up (Y), rotation[2] = around E/W (X)
+            # Negation of rotation[0] is applied in Environment.js (not here) to avoid double-negation
+            rot_x = entry["rotation"][2]  # Around E/W axis (X)
+            rot_y = entry["rotation"][1] - 90.0  # Around Up axis (Y), model orientation offset
+            rot_z = entry["rotation"][0]  # Around N/S axis (Z), raw — JS negates
 
             scale = entry["scale"] / 1024.0
             model = entry["modelPath"].lower().replace("\\", "/")
@@ -760,12 +760,12 @@ def build_doodad_json(all_tile_data, center_pos, center_height):
             three_z = ofs_z + p[2]
             three_y = p[1] - center_height
 
-            # ADT rotations are in degrees!
-            # Models were converted from Z-up to Y-up, adjustments needed:
-            # - Yaw: -90° offset for coordinate system conversion
-            rot_x = entry["rotation"][2]  # Roll
-            rot_y = entry["rotation"][1] - 90.0  # Yaw (coordinate system offset)
-            rot_z = entry["rotation"][0]  # Pitch
+            # ADT rotations are in degrees (wowdev wiki MDDF reference)
+            # rotation[0] = around N/S axis (Z), rotation[1] = around Up (Y), rotation[2] = around E/W (X)
+            # Negation of rotation[0] is applied in Environment.js (not here) to avoid double-negation
+            rot_x = entry["rotation"][2]  # Around E/W axis (X)
+            rot_y = entry["rotation"][1] - 90.0  # Around Up axis (Y), model orientation offset
+            rot_z = entry["rotation"][0]  # Around N/S axis (Z), raw — JS negates
 
             # Bounding box size from extents
             lo = entry["extentsLo"]

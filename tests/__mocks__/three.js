@@ -51,7 +51,7 @@ function makeMatrix16() {
 }
 
 function makeEuler() {
-  return { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } };
+  return { x: 0, y: 0, z: 0, order: 'XYZ', set(x, y, z, order) { this.x = x; this.y = y; this.z = z; if (order) this.order = order; } };
 }
 
 export class Group {
@@ -263,7 +263,14 @@ export class InstancedMesh {
     this.isMesh = true;
     this.parent = null;
   }
-  setMatrixAt(index, matrix) {}
+  setMatrixAt(index, matrix) {
+    if (matrix && matrix.elements) {
+      const offset = index * 16;
+      for (let i = 0; i < 16; i++) {
+        this.instanceMatrix.array[offset + i] = matrix.elements[i];
+      }
+    }
+  }
 }
 
 // Lights
