@@ -408,6 +408,20 @@ describe('LocalPlayer', () => {
       expect(player.currentLowerBodyTurn).toBeCloseTo(0, 5);
     });
 
+    it('backward + strafe left converges to -45° (-PI/4)', () => {
+      player.setKey('s', true);
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(-Math.PI / 4, 1);
+    });
+
+    it('backward + strafe right converges to +45° (PI/4)', () => {
+      player.setKey('s', true);
+      player.setKey('e', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(Math.PI / 4, 1);
+    });
+
     it('lower body turn returns to zero when stopping', () => {
       player.setKey('w', true);
       player.setKey('q', true);

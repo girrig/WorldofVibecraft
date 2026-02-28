@@ -121,10 +121,12 @@ export class LocalPlayer {
 
     // --- Split body: lower body turns toward diagonal movement direction ---
     let lowerBodyTarget = 0;
-    if (isMoving && moveZ <= 0 && Math.abs(moveX) > 0) {
-      // Forward + strafe: rotate lower body (legs) toward actual movement direction
-      const localAngle = Math.atan2(moveX, -moveZ);
-      lowerBodyTarget = -localAngle * LOWER_BODY_TURN_FRACTION;
+    if (isMoving && Math.abs(moveX) > 0) {
+      // Forward/backward + strafe: rotate lower body toward actual movement direction
+      // When backpedaling, negate angle so legs turn toward the correct diagonal
+      const sign = moveZ > 0 ? -1 : 1;
+      const localAngle = Math.atan2(moveX, Math.abs(moveZ));
+      lowerBodyTarget = sign * -localAngle * LOWER_BODY_TURN_FRACTION;
     }
     this.currentLowerBodyTurn += (lowerBodyTarget - this.currentLowerBodyTurn) * Math.min(1, TWIST_SPEED * dt);
 
