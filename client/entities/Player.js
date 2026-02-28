@@ -40,6 +40,7 @@ export class LocalPlayer {
     // Jump state
     this.velocityY = 0;
     this.grounded = true;
+    this.airVelocity = null; // locked horizontal velocity while airborne
   }
 
   playAnimation(name) {
@@ -96,11 +97,22 @@ export class LocalPlayer {
     const moveDir = new THREE.Vector3(moveX, 0, moveZ);
     const isMoving = moveDir.lengthSq() > 0;
 
+    // Compute world-space velocity from current inputs (used for ground movement + jump takeoff)
+    let groundVelX = 0, groundVelZ = 0;
     if (isMoving) {
-      moveDir.normalize();
-      moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.characterYaw);
-      this.position.x += moveDir.x * speed * dt;
-      this.position.z += moveDir.z * speed * dt;
+      const dir = moveDir.clone().normalize();
+      dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.characterYaw);
+      groundVelX = dir.x * speed;
+      groundVelZ = dir.z * speed;
+    }
+
+    if (this.grounded) {
+      this.position.x += groundVelX * dt;
+      this.position.z += groundVelZ * dt;
+    } else if (this.airVelocity) {
+      // In the air: use locked-in velocity from takeoff
+      this.position.x += this.airVelocity.x * dt;
+      this.position.z += this.airVelocity.z * dt;
     }
 
     // --- Animation state ---
@@ -120,15 +132,18 @@ export class LocalPlayer {
     if (this.mixer) this.mixer.update(dt);
 
     // --- Split body: lower body turns toward diagonal movement direction ---
-    let lowerBodyTarget = 0;
-    if (isMoving && Math.abs(moveX) > 0) {
-      // Forward/backward + strafe: rotate lower body toward actual movement direction
-      // When backpedaling, negate angle so legs turn toward the correct diagonal
-      const sign = moveZ > 0 ? -1 : 1;
-      const localAngle = Math.atan2(moveX, Math.abs(moveZ));
-      lowerBodyTarget = sign * -localAngle * LOWER_BODY_TURN_FRACTION;
+    // While airborne, freeze the twist at its takeoff value (WoW-style)
+    if (this.grounded) {
+      let lowerBodyTarget = 0;
+      if (isMoving && Math.abs(moveX) > 0) {
+        // Forward/backward + strafe: rotate lower body toward actual movement direction
+        // When backpedaling, negate angle so legs turn toward the correct diagonal
+        const sign = moveZ > 0 ? -1 : 1;
+        const localAngle = Math.atan2(moveX, Math.abs(moveZ));
+        lowerBodyTarget = sign * -localAngle * LOWER_BODY_TURN_FRACTION;
+      }
+      this.currentLowerBodyTurn += (lowerBodyTarget - this.currentLowerBodyTurn) * Math.min(1, TWIST_SPEED * dt);
     }
-    this.currentLowerBodyTurn += (lowerBodyTarget - this.currentLowerBodyTurn) * Math.min(1, TWIST_SPEED * dt);
 
     // Counter-rotate spine so upper body keeps facing character direction
     if (this.spineBone && Math.abs(this.currentLowerBodyTurn) > 0.001) {
@@ -143,6 +158,13 @@ export class LocalPlayer {
     if (this.keys[' '] && this.grounded) {
       this.velocityY = JUMP_VELOCITY;
       this.grounded = false;
+
+      // Lock in horizontal velocity at takeoff (WoW-style: no air control)
+      if (isMoving) {
+        this.airVelocity = new THREE.Vector3(groundVelX, 0, groundVelZ);
+      } else {
+        this.airVelocity = null; // standing jump, no horizontal movement
+      }
     }
 
     if (!this.grounded) {
@@ -154,6 +176,7 @@ export class LocalPlayer {
         this.position.y = terrainY;
         this.velocityY = 0;
         this.grounded = true;
+        this.airVelocity = null;
       }
     } else {
       this.position.y = terrainY;

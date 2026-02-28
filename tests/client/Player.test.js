@@ -83,9 +83,10 @@ describe('LocalPlayer', () => {
       expect(player.mesh.position).toBeDefined();
     });
 
-    it('starts grounded with zero vertical velocity', () => {
+    it('starts grounded with zero vertical velocity and no air velocity', () => {
       expect(player.grounded).toBe(true);
       expect(player.velocityY).toBe(0);
+      expect(player.airVelocity).toBeNull();
     });
 
     it('includes space key in keys', () => {
@@ -422,6 +423,46 @@ describe('LocalPlayer', () => {
       expect(player.currentLowerBodyTurn).toBeCloseTo(Math.PI / 4, 1);
     });
 
+    it('lower body twist freezes while airborne', () => {
+      player.setKey('w', true);
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      const twistBeforeJump = player.currentLowerBodyTurn;
+      expect(Math.abs(twistBeforeJump)).toBeGreaterThan(0.1); // has twist from strafing
+
+      // Jump and release keys
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      player.setKey('w', false);
+      player.setKey('q', false);
+
+      // Twist should stay frozen mid-air despite keys released
+      for (let i = 0; i < 10; i++) player.update(dt, createMockControls());
+      expect(player.grounded).toBe(false);
+      expect(player.currentLowerBodyTurn).toBeCloseTo(twistBeforeJump, 2);
+    });
+
+    it('lower body twist resumes updating after landing', () => {
+      player.setKey('w', true);
+      player.setKey('q', true);
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+
+      // Jump and release strafe key
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      player.setKey('q', false);
+
+      // Land (still holding W only)
+      for (let i = 0; i < 60; i++) player.update(dt, createMockControls());
+      expect(player.grounded).toBe(true);
+
+      // After landing with only W held, twist should return to 0
+      for (let i = 0; i < 30; i++) player.update(dt, createMockControls());
+      expect(player.currentLowerBodyTurn).toBeCloseTo(0, 2);
+    });
+
     it('lower body turn returns to zero when stopping', () => {
       player.setKey('w', true);
       player.setKey('q', true);
@@ -539,12 +580,13 @@ describe('LocalPlayer', () => {
       expect(airtime).toBeCloseTo(expectedAirtime, 1);
     });
 
-    it('allows horizontal movement while airborne (air control)', () => {
+    it('preserves horizontal momentum from takeoff (WoW-style)', () => {
       groundPlayer();
-      player.setKey(' ', true);
-      player.update(dt, createMockControls());
-      player.setKey(' ', false);
       player.setKey('w', true);
+      player.setKey(' ', true);
+      player.update(dt, createMockControls()); // jump while running
+      player.setKey(' ', false);
+      player.setKey('w', false); // release W mid-air
       const xBefore = player.position.x;
       const zBefore = player.position.z;
       player.update(dt, createMockControls());
@@ -552,8 +594,60 @@ describe('LocalPlayer', () => {
         (player.position.x - xBefore) ** 2 +
         (player.position.z - zBefore) ** 2
       );
-      expect(dist).toBeGreaterThan(0);
+      expect(dist).toBeGreaterThan(0); // still moving despite W released
       expect(player.grounded).toBe(false);
+    });
+
+    it('standing jump has no horizontal movement', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls()); // jump without movement keys
+      player.setKey(' ', false);
+      const xBefore = player.position.x;
+      const zBefore = player.position.z;
+      player.update(dt, createMockControls());
+      expect(player.position.x).toBe(xBefore);
+      expect(player.position.z).toBe(zBefore);
+    });
+
+    it('pressing movement keys mid-air does not change trajectory', () => {
+      groundPlayer();
+      player.setKey(' ', true);
+      player.update(dt, createMockControls()); // standing jump
+      player.setKey(' ', false);
+      player.setKey('w', true); // press W after already airborne
+      const xBefore = player.position.x;
+      const zBefore = player.position.z;
+      player.update(dt, createMockControls());
+      // No air control — should not move horizontally
+      expect(player.position.x).toBe(xBefore);
+      expect(player.position.z).toBe(zBefore);
+    });
+
+    it('air velocity matches ground speed at takeoff', () => {
+      groundPlayer();
+      player.setKey('w', true);
+      player.setKey(' ', true);
+      player.update(dt, createMockControls()); // jump while running forward
+      player.setKey(' ', false);
+      player.setKey('w', false);
+      // airVelocity should have been locked at RUN_SPEED
+      const airSpeed = Math.sqrt(player.airVelocity.x ** 2 + player.airVelocity.z ** 2);
+      expect(airSpeed).toBeCloseTo(RUN_SPEED, 3);
+    });
+
+    it('airVelocity is cleared on landing', () => {
+      groundPlayer();
+      player.setKey('w', true);
+      player.setKey(' ', true);
+      player.update(dt, createMockControls());
+      player.setKey(' ', false);
+      player.setKey('w', false);
+      expect(player.airVelocity).not.toBeNull();
+      // Land
+      for (let i = 0; i < 60; i++) player.update(dt, createMockControls());
+      expect(player.grounded).toBe(true);
+      expect(player.airVelocity).toBeNull();
     });
 
     it('holding space produces repeated jumps (bunny hop)', () => {
