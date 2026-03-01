@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY, WORLD_SIZE } from '../../shared/constants.js';
+import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY, WORLD_SIZE, STEP_HEIGHT } from '../../shared/constants.js';
 import { getTerrainHeight } from '../world/Terrain.js';
-import { resolveMovement } from '../world/CollisionSystem.js';
+import { resolveMovement, getCollisionHeightAt } from '../world/CollisionSystem.js';
 import { getPlayerColor, createPlayerMesh } from './PlayerModel.js';
 
 export { preloadPlayerModel } from './PlayerModel.js';
@@ -9,6 +9,7 @@ export { preloadPlayerModel } from './PlayerModel.js';
 const FADE_DURATION = 0.2; // seconds for animation crossfade
 const LOWER_BODY_TURN_FRACTION = 1.0; // full rotation toward movement direction (matches classic WoW)
 const TWIST_SPEED = 40; // near-instant transition (~2-4 frames at 60fps, matches classic WoW)
+const STEP_DOWN = 0.5; // Max drop to auto-step down; larger drops trigger a fall
 
 export class LocalPlayer {
   constructor(id, name) {
@@ -116,13 +117,46 @@ export class LocalPlayer {
       dz = this.airVelocity.z * dt;
     }
     if (dx !== 0 || dz !== 0) {
+      const origX = this.position.x;
+      const origZ = this.position.z;
+      const desiredX = origX + dx;
+      const desiredZ = origZ + dz;
       const resolved = resolveMovement(
-        this.position.x, this.position.z,
-        this.position.x + dx, this.position.z + dz,
-        this.position.y
+        origX, origZ,
+        desiredX, desiredZ,
+        this.position.y,
+        this.grounded
       );
       this.position.x = resolved.x;
       this.position.z = resolved.z;
+
+      // If airborne and collision pushed us out, clip air velocity so it
+      // doesn't keep pushing into the wall (prevents oscillation jitter).
+      // Exception: if position was completely frozen (concave trap between
+      // two objects), preserve air velocity so the jump can carry the
+      // player above the obstacles where velocity takes effect.
+      if (!this.grounded && this.airVelocity) {
+        const movedX = resolved.x - origX;
+        const movedZ = resolved.z - origZ;
+        const didMove = movedX * movedX + movedZ * movedZ > 0.0001;
+
+        if (didMove) {
+          const pushX = resolved.x - desiredX;
+          const pushZ = resolved.z - desiredZ;
+          const pushLenSq = pushX * pushX + pushZ * pushZ;
+          if (pushLenSq > 0.0001) {
+            const pushLen = Math.sqrt(pushLenSq);
+            const wallNx = pushX / pushLen;
+            const wallNz = pushZ / pushLen;
+            // Remove velocity component going into the wall
+            const dot = this.airVelocity.x * wallNx + this.airVelocity.z * wallNz;
+            if (dot < 0) {
+              this.airVelocity.x -= dot * wallNx;
+              this.airVelocity.z -= dot * wallNz;
+            }
+          }
+        }
+      }
     }
 
     // --- Animation state ---
@@ -178,18 +212,37 @@ export class LocalPlayer {
     }
 
     if (!this.grounded) {
+      const prevY = this.position.y;
+
       // Velocity-Verlet: exact for constant acceleration
       this.position.y += this.velocityY * dt - 0.5 * GRAVITY * dt * dt;
       this.velocityY -= GRAVITY * dt;
 
-      if (this.position.y <= terrainY) {
-        this.position.y = terrainY;
+      // Swept check: look for surfaces between previous and current Y.
+      // Prevents falling through thin surfaces at high fall speeds.
+      const fallDistance = Math.max(0, prevY - this.position.y);
+      const collisionY = getCollisionHeightAt(this.position.x, this.position.z, this.position.y, fallDistance);
+      const groundY = Math.max(terrainY, collisionY);
+
+      if (this.position.y <= groundY) {
+        this.position.y = groundY;
         this.velocityY = 0;
         this.grounded = true;
         this.airVelocity = null;
       }
     } else {
-      this.position.y = terrainY;
+      // When grounded, allow auto-step-up within STEP_HEIGHT
+      const collisionY = getCollisionHeightAt(this.position.x, this.position.z, this.position.y, STEP_HEIGHT);
+      const groundY = Math.max(terrainY, collisionY);
+
+      if (groundY < this.position.y - STEP_DOWN) {
+        // Walked off an edge — start falling
+        this.grounded = false;
+        this.velocityY = 0;
+        this.airVelocity = isMoving ? new THREE.Vector3(groundVelX, 0, groundVelZ) : null;
+      } else {
+        this.position.y = groundY;
+      }
     }
 
     // Clamp to world bounds

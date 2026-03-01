@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WORLD_SIZE } from '../../shared/constants.js';
-import { addTrimeshCollider, finalize as finalizeCollision } from './CollisionSystem.js';
+import { addOBBCollider, addTrimeshCollider, finalize as finalizeCollision } from './CollisionSystem.js';
 
 // ── Module state ──
 let doodadData = null;
@@ -61,21 +61,34 @@ function registerDoodadColliders(modelPath, instances) {
 
     if (maxY - minY < 0.2) continue;
 
-    // Build XZ triangle array (6 floats per tri: ax,az, bx,bz, cx,cz)
-    const tris = new Float32Array(numTris * 6);
-    for (let t = 0; t < numTris; t++) {
-      const i0 = triIndices[t * 3];
-      const i1 = triIndices[t * 3 + 1];
-      const i2 = triIndices[t * 3 + 2];
-      tris[t * 6]     = wx[i0];
-      tris[t * 6 + 1] = wz[i0];
-      tris[t * 6 + 2] = wx[i1];
-      tris[t * 6 + 3] = wz[i1];
-      tris[t * 6 + 4] = wx[i2];
-      tris[t * 6 + 5] = wz[i2];
+    // Doodads use OBB collision (flat top, solid walls, aligned to rotation).
+    // OBB matches WoW's rotated bounding volume for M2 doodads.
+    const rotYRad = (d.rotY || 0) * Math.PI / 180;
+    const cosA = Math.cos(rotYRad);
+    const sinA = Math.sin(rotYRad);
+
+    // Project world-space vertices into OBB-local frame (undoing Y rotation)
+    let localMinX = Infinity, localMaxX = -Infinity;
+    let localMinZ = Infinity, localMaxZ = -Infinity;
+    for (let i = 0; i < numVerts; i++) {
+      const relX = wx[i] - d.x;
+      const relZ = wz[i] - d.z;
+      const lx = cosA * relX - sinA * relZ;
+      const lz = sinA * relX + cosA * relZ;
+      if (lx < localMinX) localMinX = lx;
+      if (lx > localMaxX) localMaxX = lx;
+      if (lz < localMinZ) localMinZ = lz;
+      if (lz > localMaxZ) localMaxZ = lz;
     }
 
-    addTrimeshCollider(tris, minY, maxY);
+    const halfW = (localMaxX - localMinX) / 2;
+    const halfD = (localMaxZ - localMinZ) / 2;
+    const localCx = (localMinX + localMaxX) / 2;
+    const localCz = (localMinZ + localMaxZ) / 2;
+    const cx = cosA * localCx + sinA * localCz + d.x;
+    const cz = -sinA * localCx + cosA * localCz + d.z;
+
+    addOBBCollider(cx, cz, halfW, halfD, cosA, sinA, minY, maxY);
   }
 }
 
@@ -129,6 +142,8 @@ function registerWMOColliders(modelPath, wmo) {
 
   // Build XZ triangle array (6 floats per tri: ax,az, bx,bz, cx,cz)
   const tris = new Float32Array(numTris * 6);
+  // Build 3D triangle array (9 floats per tri: ax,ay,az, bx,by,bz, cx,cy,cz)
+  const tris3D = new Float32Array(numTris * 9);
   for (let t = 0; t < numTris; t++) {
     const i0 = triIndices[t * 3];
     const i1 = triIndices[t * 3 + 1];
@@ -139,9 +154,14 @@ function registerWMOColliders(modelPath, wmo) {
     tris[t * 6 + 3] = wz[i1];
     tris[t * 6 + 4] = wx[i2];
     tris[t * 6 + 5] = wz[i2];
+
+    const o = t * 9;
+    tris3D[o]     = wx[i0]; tris3D[o + 1] = wy[i0]; tris3D[o + 2] = wz[i0];
+    tris3D[o + 3] = wx[i1]; tris3D[o + 4] = wy[i1]; tris3D[o + 5] = wz[i1];
+    tris3D[o + 6] = wx[i2]; tris3D[o + 7] = wy[i2]; tris3D[o + 8] = wz[i2];
   }
 
-  addTrimeshCollider(tris, minY, maxY);
+  addTrimeshCollider(tris, minY, maxY, tris3D);
 }
 
 /**

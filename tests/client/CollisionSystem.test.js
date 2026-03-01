@@ -184,14 +184,13 @@ describe('CollisionSystem — Trimesh', () => {
     expect(result.x !== 10 || result.z !== 10).toBe(true);
   });
 
-  it('pushes player out when starting inside trimesh', () => {
-    const tris = squareTrimesh(10, 10, 5); // large square
+  it('freezes player when starting inside concave trimesh (prevents jitter)', () => {
+    const tris = squareTrimesh(10, 10, 5); // large square (shared diagonal = concave seam)
     mod.addTrimeshCollider(tris, 0, 3);
-    // Start and end both inside the trimesh
+    // Start and end both inside — concave trap freezes position to prevent jitter
     const result = mod.resolveMovement(10, 10, 10.1, 10, 0);
-    // Should be pushed out — x should NOT be at 10.1
-    const dist = Math.sqrt((result.x - 10) ** 2 + (result.z - 10) ** 2);
-    expect(dist).toBeGreaterThan(0);
+    expect(result.x).toBe(10);
+    expect(result.z).toBe(10);
   });
 
   it('allows movement when trimesh is vertically out of range', () => {
@@ -363,5 +362,51 @@ describe('CollisionSystem — Edge cases', () => {
     const result = mod.resolveMovement(8, 10, 10, 10, 0);
     // Should collide (player 0-1.8 overlaps collider 1-3)
     expect(result.x).toBeLessThan(10);
+  });
+
+  it('grounded=true skips collision when player feet near collider top (ON_TOP_EPS)', () => {
+    // AABB from y=0 to y=0.1 — player feet at y=0 are within 0.15 of top
+    mod.addAABBCollider(9, 9, 11, 11, 0, 0.1);
+    const result = mod.resolveMovement(8, 10, 10, 10, 0, true);
+    // ON_TOP_EPS=0.15 when grounded: playerMinY(0) >= maxY(0.1) - 0.15(-0.05) is false
+    // But this is standing on top — player feet at collider top → skip
+    expect(result).toEqual({ x: 10, z: 10 });
+  });
+
+  it('grounded=false blocks collision at collider top (no ON_TOP_EPS)', () => {
+    // Same setup but airborne — ON_TOP_EPS=0, so collision fires
+    mod.addAABBCollider(9, 9, 11, 11, 0, PLAYER_HEIGHT + 0.5);
+    // Player at y=PLAYER_HEIGHT - 0.1 with feet just inside collider top range
+    const playerY = PLAYER_HEIGHT - 0.1;
+    const resultGrounded = mod.resolveMovement(8, 10, 10, 10, playerY, true);
+    const resultAirborne = mod.resolveMovement(8, 10, 10, 10, playerY, false);
+    // Grounded skips (feet near top), airborne blocks
+    // playerMinY = playerY, playerMaxY = playerY + PLAYER_HEIGHT
+    // Collider maxY - ON_TOP_EPS: grounded → maxY - 0.15, airborne → maxY - 0
+    // For grounded: playerMinY >= maxY - 0.15 means skip if feet at or above that
+    // This tests that airborne is more restrictive
+    expect(resultAirborne.x).toBeLessThanOrEqual(resultGrounded.x);
+  });
+
+  it('concave trap between two AABBs returns start position', () => {
+    // Two parallel walls with narrow gap — player stuck between them
+    mod.addAABBCollider(-1, -10, 0, 10, 0, 5);    // wall 1 (right face at x=0)
+    mod.addAABBCollider(0.5, -10, 1.5, 10, 0, 5);  // wall 2 (left face at x=0.5)
+    // Player at x=0.25 (between walls), radius 0.389 overlaps both
+    const result = mod.resolveMovement(0.25, 0, 0.25, -1, 0);
+    // Concave trap detects opposing push normals → returns start position
+    expect(result.x).toBe(0.25);
+    expect(result.z).toBe(0);
+  });
+
+  it('concave trap between two OBBs returns start position', () => {
+    // Two OBBs forming a narrow gap (same geometry as AABB test, using OBB API)
+    mod.addOBBCollider(-0.5, 0, 0.5, 10, 1, 0, 0, 5);  // wall 1: x=-1..0
+    mod.addOBBCollider(0.75, 0, 0.25, 10, 1, 0, 0, 5);  // wall 2: x=0.5..1
+    // Player at x=0.25 (between walls), radius 0.389 overlaps both
+    const result = mod.resolveMovement(0.25, 0, 0.25, -1, 0);
+    // Concave trap detects opposing push normals → returns start position
+    expect(result.x).toBe(0.25);
+    expect(result.z).toBe(0);
   });
 });

@@ -706,3 +706,59 @@ describe('LocalPlayer', () => {
     });
   });
 });
+
+// ── Air velocity + collision interaction tests ──
+// These need fresh module imports to register colliders without polluting other tests.
+
+describe('LocalPlayer — air velocity with colliders', () => {
+  const dt = 1 / 60;
+  const controls = { rightMouseDown: false, leftMouseDown: false, bothButtonsForward: false, cameraYaw: 0 };
+
+  it('preserves air velocity when frozen between two walls (concave trap)', async () => {
+    vi.resetModules();
+    const THREE = await import('../__mocks__/three.js');
+    const collisionMod = await import('../../client/world/CollisionSystem.js');
+    const { LocalPlayer: FreshPlayer } = await import('../../client/entities/Player.js');
+
+    // Two parallel walls with narrow gap — player stuck between them
+    collisionMod.addAABBCollider(-1, -10, 0, 10, 0, 5);
+    collisionMod.addAABBCollider(0.5, -10, 1.5, 10, 0, 5);
+
+    const player = new FreshPlayer('test', 'Test');
+    player.position.set(0.25, 0, 0);
+    player.grounded = false;
+    player.velocityY = 5;
+    player.airVelocity = new THREE.Vector3(0, 0, -7);
+
+    player.update(dt, controls);
+
+    // Concave trap froze position → air velocity should be PRESERVED
+    expect(player.airVelocity).not.toBeNull();
+    const speed = Math.sqrt(player.airVelocity.x ** 2 + player.airVelocity.z ** 2);
+    expect(speed).toBeCloseTo(7, 1);
+  });
+
+  it('clips air velocity when hitting a single wall', async () => {
+    vi.resetModules();
+    const THREE = await import('../__mocks__/three.js');
+    const collisionMod = await import('../../client/world/CollisionSystem.js');
+    const { LocalPlayer: FreshPlayer } = await import('../../client/entities/Player.js');
+
+    // Single wall: spans x=-5..5, z=-5..0, so face at z=0
+    collisionMod.addAABBCollider(-5, -5, 5, 0, 0, 5);
+
+    const player = new FreshPlayer('test', 'Test');
+    player.position.set(0, 0, 0.3); // close to wall face at z=0
+    player.grounded = false;
+    player.velocityY = 5;
+    player.airVelocity = new THREE.Vector3(3, 0, -7); // diagonal toward wall
+
+    player.update(dt, controls);
+
+    // Player actually moved (slid along wall) → velocity is clipped
+    expect(player.airVelocity).not.toBeNull();
+    // Z component into the wall should be removed, X component preserved
+    expect(player.airVelocity.x).toBeCloseTo(3, 0);
+    expect(Math.abs(player.airVelocity.z)).toBeLessThan(2);
+  });
+});

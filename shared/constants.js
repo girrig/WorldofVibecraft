@@ -12,9 +12,10 @@ export const BACKPEDAL_FACTOR = 4.5 / 7; // Backpedal = 4.5 yd/s (WoW default)
 export const TURN_SPEED = Math.PI; // 180 degrees per second (keyboard turning)
 export const GRAVITY = 19.29110527038574;  // WoW gravity (yards/s²) — from client memory
 export const JUMP_VELOCITY = 7.95554;      // WoW jump speed (yards/s) — ~1.64yd height, ~0.825s airtime
+export const STEP_HEIGHT = 1.6;            // Max height to auto-step up (WoW: BASE_UNIT_DIM*6 = 1.6 yards)
 
-export const PLAYER_HEIGHT = 1.8;
-export const PLAYER_RADIUS = 0.4;
+export const PLAYER_HEIGHT = 2.03128;  // Human Male CollisionHeight from CreatureModelData.dbc
+export const PLAYER_RADIUS = 0.389;   // DEFAULT_PLAYER_BOUNDING_RADIUS from ObjectDefines.h
 
 // Camera
 export const CAMERA_MIN_DISTANCE = 1.5;

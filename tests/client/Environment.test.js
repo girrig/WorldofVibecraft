@@ -531,12 +531,11 @@ describe('Environment', () => {
   // ── Collision registration ──
 
   describe('collision registration', () => {
-    // Simple triangle mesh: a small square at origin in glTF Y-up coords
-    // verts: (0,0,0), (2,0,0), (2,2,0), (0,2,0) — flat on XZ at y=0
+    // Collision mesh vertices in glTF Y-up coords
     const COLLISION_DATA = {
       'trees/oak.m2': {
-        verts: [0, 0, 0, 2, 0, 0, 2, 0, 2, 0, 0, 2], // 4 verts: xyzxyzxyzxyz
-        tris: [0, 1, 2, 0, 2, 3], // 2 triangles
+        verts: [0, 0, 0, 2, 3, 0, 2, 3, 2, 0, 0, 2], // Y range 0-3 → registers OBB
+        tris: [0, 1, 2, 0, 2, 3],
       },
       'buildings/abbey.wmo': {
         verts: [-5, 0, -5, 5, 0, -5, 5, 5, 5, -5, 5, 5],
@@ -544,18 +543,21 @@ describe('Environment', () => {
       },
     };
 
-    it('registers doodad trimesh colliders when collision data is present', async () => {
+    it('registers doodad OBB colliders when collision data is present', async () => {
       mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD, COLLISION_DATA);
       await mod.loadEnvironment();
       await mod.createEnvironment();
       await flushAsync();
 
-      // Import collision system to check registrations
       const collisionMod = await import('../../client/world/CollisionSystem.js');
       const stats = collisionMod.getStats();
-      // Collision data for oak.m2 has Y-extent of 0 (flat) → skipped (maxY - minY < 0.2)
-      // Collision data for abbey.wmo has Y-extent of 5 → should register
-      expect(stats.colliderCount).toBeGreaterThan(0);
+      // oak.m2 has 2 instances → 2 OBB colliders, abbey.wmo → 1 trimesh collider
+      expect(stats.colliderCount).toBeGreaterThanOrEqual(3);
+
+      // Verify doodad colliders are OBBs (have halfW property, not minX)
+      const colliders = collisionMod.getColliders();
+      const obbColliders = colliders.filter(c => c.halfW !== undefined);
+      expect(obbColliders.length).toBe(2);
     });
 
     it('does not crash when collision data is missing for a model', async () => {

@@ -96,7 +96,7 @@ export function addOBBCollider(cx, cz, halfW, halfD, cosA, sinA, minY, maxY) {
   insertIntoGrid(index, cx - extentX, cz - extentZ, cx + extentX, cz + extentZ);
 }
 
-export function addTrimeshCollider(tris, minY, maxY) {
+export function addTrimeshCollider(tris, minY, maxY, tris3D) {
   const index = colliders.length;
   // Compute XZ AABB from triangle vertices for spatial grid
   let minX = Infinity, maxX = -Infinity;
@@ -107,7 +107,7 @@ export function addTrimeshCollider(tris, minY, maxY) {
     if (tris[i + 1] < minZ) minZ = tris[i + 1];
     if (tris[i + 1] > maxZ) maxZ = tris[i + 1];
   }
-  colliders.push({ type: COLLIDER_TRIMESH, tris, minY, maxY });
+  colliders.push({ type: COLLIDER_TRIMESH, tris, minY, maxY, tris3D: tris3D || null });
   insertIntoGrid(index, minX, minZ, maxX, maxZ);
 }
 
@@ -257,11 +257,23 @@ function testCircleVsTriangle(px, pz, radius, ax, az, bx, bz, cx, cz) {
   };
 }
 
-function testCylinderVsTrimesh(px, pz, pRadius, tris) {
+function testCylinderVsTrimesh(px, pz, pRadius, tris, tris3D) {
   let deepest = null;
   let deepestDepth = 0;
   const numTris = tris.length / 6;
   for (let t = 0; t < numTris; t++) {
+    // Skip walkable (floor) triangles — they handle vertical collision only.
+    // Without this, standing on top of an object triggers XZ push-out from
+    // the floor surface triangles, sliding the player off.
+    if (tris3D) {
+      const o3 = t * 9;
+      const e1x = tris3D[o3+3] - tris3D[o3], e1y = tris3D[o3+4] - tris3D[o3+1], e1z = tris3D[o3+5] - tris3D[o3+2];
+      const e2x = tris3D[o3+6] - tris3D[o3], e2y = tris3D[o3+7] - tris3D[o3+1], e2z = tris3D[o3+8] - tris3D[o3+2];
+      const ny = e1z * e2x - e1x * e2z;
+      const nLenSq = (e1y * e2z - e1z * e2y) ** 2 + ny * ny + (e1x * e2y - e1y * e2x) ** 2;
+      if (nLenSq > 1e-10 && (ny * ny) / nLenSq >= MIN_WALKABLE_NORMAL_Y_SQ) continue;
+    }
+
     const o = t * 6;
     const hit = testCircleVsTriangle(px, pz, pRadius,
       tris[o], tris[o + 1], tris[o + 2], tris[o + 3], tris[o + 4], tris[o + 5]);
@@ -275,7 +287,7 @@ function testCylinderVsTrimesh(px, pz, pRadius, tris) {
 
 // ── Movement resolution ──
 
-export function resolveMovement(startX, startZ, endX, endZ, playerY) {
+export function resolveMovement(startX, startZ, endX, endZ, playerY, grounded = true) {
   if (colliders.length === 0) return { x: endX, z: endZ };
 
   // Broad-phase: query swept bounding rect expanded by player radius
@@ -293,6 +305,14 @@ export function resolveMovement(startX, startZ, endX, endZ, playerY) {
   let posX = endX;
   let posZ = endZ;
 
+  // Small tolerance: skip horizontal collision when player feet are near
+  // collider top (standing on it). Prevents jitter during landing frames.
+  // Only apply when grounded — airborne players need full wall collision
+  // to prevent ghosting through the top portion of objects like planters.
+  const ON_TOP_EPS = grounded ? 0.15 : 0;
+
+  let prevNx = 0, prevNz = 0;
+
   for (let iter = 0; iter < MAX_SLIDE_ITERATIONS; iter++) {
     let deepest = null;
     let deepestDepth = 0;
@@ -300,8 +320,8 @@ export function resolveMovement(startX, startZ, endX, endZ, playerY) {
     for (let i = 0; i < candidates.length; i++) {
       const c = colliders[candidates[i]];
 
-      // Vertical overlap check
-      if (playerMaxY <= c.minY || playerMinY >= c.maxY) continue;
+      // Vertical overlap check (with tolerance for standing on top)
+      if (playerMaxY <= c.minY || playerMinY >= c.maxY - ON_TOP_EPS) continue;
 
       let hit;
       if (c.type === COLLIDER_AABB) {
@@ -309,7 +329,7 @@ export function resolveMovement(startX, startZ, endX, endZ, playerY) {
       } else if (c.type === COLLIDER_OBB) {
         hit = testCylinderVsOBB(posX, posZ, PLAYER_RADIUS, c.cx, c.cz, c.halfW, c.halfD, c.cosA, c.sinA);
       } else if (c.type === COLLIDER_TRIMESH) {
-        hit = testCylinderVsTrimesh(posX, posZ, PLAYER_RADIUS, c.tris);
+        hit = testCylinderVsTrimesh(posX, posZ, PLAYER_RADIUS, c.tris, c.tris3D);
       } else {
         hit = testCylinderVsCylinder(posX, posZ, PLAYER_RADIUS, c.cx, c.cz, c.radius);
       }
@@ -322,12 +342,151 @@ export function resolveMovement(startX, startZ, endX, endZ, playerY) {
 
     if (!deepest) break;
 
+    // Detect concave trap: consecutive push-outs in opposite directions
+    // means we're bouncing between walls (trough, wheelbarrow, etc.)
+    if (iter > 0) {
+      const dot = deepest.nx * prevNx + deepest.nz * prevNz;
+      if (dot < -0.5) {
+        // Only revert if the start position is collision-free (player is
+        // walking INTO the concave shape). If start is also inside, the
+        // player is already trapped — let the push-out attempt proceed.
+        let startClear = true;
+        for (let j = 0; j < candidates.length; j++) {
+          const sc = colliders[candidates[j]];
+          if (playerMaxY <= sc.minY || playerMinY >= sc.maxY - ON_TOP_EPS) continue;
+          let sh;
+          if (sc.type === COLLIDER_AABB) sh = testCylinderVsAABB(startX, startZ, PLAYER_RADIUS, sc.minX, sc.minZ, sc.maxX, sc.maxZ);
+          else if (sc.type === COLLIDER_OBB) sh = testCylinderVsOBB(startX, startZ, PLAYER_RADIUS, sc.cx, sc.cz, sc.halfW, sc.halfD, sc.cosA, sc.sinA);
+          else if (sc.type === COLLIDER_TRIMESH) sh = testCylinderVsTrimesh(startX, startZ, PLAYER_RADIUS, sc.tris, sc.tris3D);
+          else sh = testCylinderVsCylinder(startX, startZ, PLAYER_RADIUS, sc.cx, sc.cz, sc.radius);
+          if (sh && sh.depth > PUSH_EPSILON) { startClear = false; break; }
+        }
+        // Start clear → walking INTO concave shape → block movement
+        // Start inside → already trapped → freeze horizontal position (no jitter)
+        // Either way, revert to start. Player can jump out vertically.
+        return { x: startX, z: startZ };
+      }
+    }
+    prevNx = deepest.nx;
+    prevNz = deepest.nz;
+
     // Push player out of the deepest collision
     posX += deepest.nx * (deepest.depth + PUSH_EPSILON);
     posZ += deepest.nz * (deepest.depth + PUSH_EPSILON);
   }
 
   return { x: posX, z: posZ };
+}
+
+// ── Vertical collision: surface height query ──
+
+const MIN_WALKABLE_NORMAL_Y = 0.574; // cos(55°) — WoW's walkable slope limit (55° from horizontal)
+const MIN_WALKABLE_NORMAL_Y_SQ = MIN_WALKABLE_NORMAL_Y * MIN_WALKABLE_NORMAL_Y;
+
+/**
+ * Query the highest walkable collision surface at (px, pz) that the player
+ * could stand on. Returns -Infinity if no surface found.
+ *
+ * @param {number} px - Player X position
+ * @param {number} pz - Player Z position
+ * @param {number} playerY - Player's current foot Y position
+ * @param {number} stepHeight - Max height above playerY to auto-step onto
+ */
+export function getCollisionHeightAt(px, pz, playerY, stepHeight) {
+  if (colliders.length === 0) return -Infinity;
+
+  const candidates = queryGrid(px - PLAYER_RADIUS, pz - PLAYER_RADIUS,
+                                px + PLAYER_RADIUS, pz + PLAYER_RADIUS);
+  if (candidates.length === 0) return -Infinity;
+
+  let maxSurfaceY = -Infinity;
+  const maxAllowedY = playerY + stepHeight;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const c = colliders[candidates[i]];
+
+    // Quick Y-bounds: skip colliders entirely above step range or entirely below player
+    if (c.minY > maxAllowedY) continue;
+
+    if (c.type === COLLIDER_TRIMESH && c.tris3D) {
+      // Test each 3D triangle for point-in-triangle (XZ) + Y interpolation
+      const t3 = c.tris3D;
+      const numTris = t3.length / 9;
+      for (let t = 0; t < numTris; t++) {
+        const o = t * 9;
+        const ax = t3[o],   ay = t3[o+1], az = t3[o+2];
+        const bx = t3[o+3], by = t3[o+4], bz = t3[o+5];
+        const cx = t3[o+6], cy = t3[o+7], cz = t3[o+8];
+
+        // Surface normal via cross product (e1 × e2)
+        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+        const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+        const ny = e1z * e2x - e1x * e2z;
+        const nx = e1y * e2z - e1z * e2y;
+        const nz = e1x * e2y - e1y * e2x;
+        const nLenSq = nx * nx + ny * ny + nz * nz;
+        if (nLenSq < 1e-10) continue;
+
+        // Only consider roughly horizontal surfaces (walkable floors)
+        const normalYSq = (ny * ny) / nLenSq;
+        if (normalYSq < MIN_WALKABLE_NORMAL_Y_SQ) continue;
+
+        // Point-in-triangle test (XZ projection) using barycentric coordinates
+        const v0x = cx - ax, v0z = cz - az;
+        const v1x = bx - ax, v1z = bz - az;
+        const v2x = px - ax, v2z = pz - az;
+
+        const dot00 = v0x * v0x + v0z * v0z;
+        const dot01 = v0x * v1x + v0z * v1z;
+        const dot02 = v0x * v2x + v0z * v2z;
+        const dot11 = v1x * v1x + v1z * v1z;
+        const dot12 = v1x * v2x + v1z * v2z;
+
+        const denom = dot00 * dot11 - dot01 * dot01;
+        if (Math.abs(denom) < 1e-10) continue;
+        const inv = 1 / denom;
+
+        const u = (dot11 * dot02 - dot01 * dot12) * inv; // weight for C
+        const v = (dot00 * dot12 - dot01 * dot02) * inv; // weight for B
+
+        if (u < -0.01 || v < -0.01 || u + v > 1.01) continue; // Outside triangle (small epsilon for edges)
+
+        // Interpolate Y at player position
+        const w = 1 - u - v; // weight for A
+        const surfaceY = w * ay + v * by + u * cy;
+
+        if (surfaceY <= maxAllowedY && surfaceY > maxSurfaceY) {
+          maxSurfaceY = surfaceY;
+        }
+      }
+    } else if (c.type === COLLIDER_AABB) {
+      // Flat top of AABB
+      if (px >= c.minX && px <= c.maxX && pz >= c.minZ && pz <= c.maxZ) {
+        if (c.maxY <= maxAllowedY && c.maxY > maxSurfaceY) {
+          maxSurfaceY = c.maxY;
+        }
+      }
+    } else if (c.type === COLLIDER_OBB) {
+      // Transform to local space and check if inside
+      const dx = px - c.cx, dz = pz - c.cz;
+      const localX = c.cosA * dx - c.sinA * dz;
+      const localZ = c.sinA * dx + c.cosA * dz;
+      if (localX >= -c.halfW && localX <= c.halfW && localZ >= -c.halfD && localZ <= c.halfD) {
+        if (c.maxY <= maxAllowedY && c.maxY > maxSurfaceY) {
+          maxSurfaceY = c.maxY;
+        }
+      }
+    } else if (c.type === COLLIDER_CYLINDER) {
+      const dx = px - c.cx, dz = pz - c.cz;
+      if (dx * dx + dz * dz <= c.radius * c.radius) {
+        if (c.maxY <= maxAllowedY && c.maxY > maxSurfaceY) {
+          maxSurfaceY = c.maxY;
+        }
+      }
+    }
+  }
+
+  return maxSurfaceY;
 }
 
 // ── Debug / stats ──
