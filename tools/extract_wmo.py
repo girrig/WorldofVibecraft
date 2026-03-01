@@ -20,7 +20,7 @@ import io
 
 from extract_model import (
     StormLib, extract_from_mpq, MPQ_LOAD_ORDER, STORMLIB_DLL,
-    blp_to_png_bytes, wow_to_gltf_pos,
+    blp_to_png_bytes, wow_to_gltf_pos, read_m2array,
 )
 
 import pygltflib
@@ -462,6 +462,52 @@ def build_wmo_glb(root_info, group_geometries, archive_pool):
     return gltf
 
 
+def extract_wmo_collision(group_geometries):
+    """Extract collision triangles from WMO group data.
+
+    Uses MOPY flags to identify collision triangles:
+      - Triangles with flags & 0x04 are NO-COLLISION, skip them.
+      - All other triangles (including materialID == 0xFF invisible walls) are collision.
+
+    Returns (verts_flat, tris_flat) in glTF Y-up coords, or ([], []) if none.
+      verts_flat: [x0,y0,z0, x1,y1,z1, ...] in glTF space
+      tris_flat:  [i0,i1,i2, ...] triangle indices
+    """
+    all_verts = []
+    all_tris = []
+    vert_offset = 0
+
+    for group in group_geometries:
+        if group["vertices"] is None or group["indices"] is None:
+            continue
+
+        verts = group["vertices"]
+        tris = group["indices"]
+        tri_flags = group["triFlags"]
+        n_verts = len(verts)
+
+        # Transform vertices: WoW (x,y,z) Z-up → glTF (x, z, -y) Y-up
+        for i in range(n_verts):
+            x, y, z = float(verts[i][0]), float(verts[i][1]), float(verts[i][2])
+            all_verts.extend([round(x, 3), round(z, 3), round(-y, 3)])
+
+        # Collect collision triangles (those NOT marked no-collision)
+        for tri_idx in range(len(tris)):
+            flags = int(tri_flags[tri_idx]) if tri_flags is not None else 0
+            # Bit 0x04 = no-collision — skip these
+            if flags & 0x04:
+                continue
+            v0, v1, v2 = int(tris[tri_idx][0]), int(tris[tri_idx][1]), int(tris[tri_idx][2])
+            all_tris.extend([v0 + vert_offset, v1 + vert_offset, v2 + vert_offset])
+
+        vert_offset += n_verts
+
+    if not all_tris:
+        return [], []
+
+    return all_verts, all_tris
+
+
 def extract_single_wmo(archive_pool, wow_wmo_path):
     """
     Extract a single WMO (root + all groups) and return a pygltflib.GLTF2 object.
@@ -515,9 +561,12 @@ def extract_single_wmo(archive_pool, wow_wmo_path):
         print(f"    No valid group geometry found")
         return None
 
+    # Extract collision geometry from MOPY-flagged triangles
+    coll_verts, coll_tris = extract_wmo_collision(group_geometries)
+
     # Build GLB
     gltf = build_wmo_glb(root_info, group_geometries, archive_pool)
-    return gltf
+    return gltf, coll_verts, coll_tris
 
 
 def main():
@@ -543,9 +592,12 @@ def main():
     with open(doodad_json_path) as f:
         doodad_data = json.load(f)
 
-    # Get unique WMO paths
+    # Get unique WMO paths (only those within world bounds)
+    HALF_WORLD = 800  # WORLD_SIZE / 2 from shared/constants.js
     unique_wmos = {}
     for wmo in doodad_data.get("wmos", []):
+        if abs(wmo["x"]) > HALF_WORLD or abs(wmo["z"]) > HALF_WORLD:
+            continue
         model = wmo["model"]
         if model not in unique_wmos:
             unique_wmos[model] = 0
@@ -568,6 +620,14 @@ def main():
 
     if "wmos" not in manifest:
         manifest["wmos"] = {}
+
+    # Load existing collision data (from doodad extraction) to append WMO data
+    collision_path = output_dir / "collision_data.json"
+    if collision_path.exists():
+        with open(collision_path) as f:
+            collision_data = json.load(f)
+    else:
+        collision_data = {}
 
     total_size = 0
     extracted = 0
@@ -595,25 +655,55 @@ def main():
                 "glb": "wmos/" + basename,
             }
             skipped += 1
+            # Still need to extract collision if not already present
+            if wow_path not in collision_data:
+                try:
+                    result = extract_single_wmo(archive_pool, wow_path)
+                    if result is not None:
+                        _, coll_verts, coll_tris = result
+                        if coll_verts and coll_tris:
+                            collision_data[wow_path] = {
+                                "verts": coll_verts,
+                                "tris": coll_tris,
+                            }
+                except Exception:
+                    pass
             continue
 
         print(f"{progress} {short_name} ({instance_count} instances)...")
 
         try:
-            gltf = extract_single_wmo(archive_pool, wow_path)
-            if gltf is None:
+            result = extract_single_wmo(archive_pool, wow_path)
+            if result is None:
                 print(f"  SKIP: extraction failed")
                 failed += 1
                 continue
 
-            gltf.save(str(glb_path))
-            file_size = glb_path.stat().st_size
-            total_size += file_size
-            print(f"  OK: {file_size / 1024:.1f} KB")
+            gltf, coll_verts, coll_tris = result
+
+            if gltf is not None:
+                gltf.save(str(glb_path))
+                file_size = glb_path.stat().st_size
+                total_size += file_size
+                print(f"  OK: {file_size / 1024:.1f} KB")
+            else:
+                print(f"  SKIP: GLB build failed")
+                failed += 1
+                continue
 
             manifest["wmos"][wow_path] = {
                 "glb": "wmos/" + basename,
             }
+
+            if coll_verts and coll_tris:
+                collision_data[wow_path] = {
+                    "verts": coll_verts,
+                    "tris": coll_tris,
+                }
+                n_cv = len(coll_verts) // 3
+                n_ct = len(coll_tris) // 3
+                print(f"  Collision: {n_cv} verts, {n_ct} tris")
+
             extracted += 1
 
         except Exception as e:
@@ -633,11 +723,24 @@ def main():
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 
+    # Write collision data (M2 doodads + WMO combined)
+    with open(collision_path, "w") as f:
+        json.dump(collision_data, f, separators=(",", ":"))
+    collision_size = collision_path.stat().st_size
+
+    # Count WMO collision stats
+    wmo_coll_count = sum(1 for k in collision_data if k in unique_wmos)
+    wmo_coll_verts = sum(len(v["verts"]) // 3 for k, v in collision_data.items() if k in unique_wmos)
+    wmo_coll_tris = sum(len(v["tris"]) // 3 for k, v in collision_data.items() if k in unique_wmos)
+
     print(f"\n== Done ==")
     print(f"  Extracted: {extracted}/{len(unique_wmos)} WMOs")
     print(f"  Cached (skipped): {skipped}")
     print(f"  Failed: {failed}")
     print(f"  Total size: {total_size / 1024 / 1024:.1f} MB")
+    print(f"  WMO Collision: {wmo_coll_count}/{len(unique_wmos)} models with collision meshes")
+    print(f"    {wmo_coll_verts} vertices, {wmo_coll_tris} triangles")
+    print(f"  Collision data: {collision_path} ({collision_size / 1024:.1f} KB)")
     print(f"  Manifest: {manifest_path}")
     print(f"  Output: {wmo_dir}")
 

@@ -354,10 +354,12 @@ def main():
     with open(doodad_json_path) as f:
         doodad_data = json.load(f)
 
-    # Count instances per unique model
+    # Count instances per unique model (only those within world bounds)
+    HALF_WORLD = 800  # WORLD_SIZE / 2 from shared/constants.js
     model_counts = Counter()
     for d in doodad_data["doodads"]:
-        model_counts[d["model"]] += 1
+        if abs(d["x"]) <= HALF_WORLD and abs(d["z"]) <= HALF_WORLD:
+            model_counts[d["model"]] += 1
 
     unique_models = sorted(model_counts.items(), key=lambda x: -x[1])
 

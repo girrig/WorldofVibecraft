@@ -52,7 +52,7 @@ const MANIFEST_PAYLOAD = {
   },
 };
 
-function mockFetchWith(doodads, manifest) {
+function mockFetchWith(doodads, manifest, collisionData = null) {
   global.fetch = vi.fn((url) => {
     if (url.includes('northshire_doodads.json')) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(doodads) });
@@ -60,6 +60,12 @@ function mockFetchWith(doodads, manifest) {
     if (url.includes('doodad_manifest.json')) {
       if (manifest) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(manifest) });
+      }
+      return Promise.resolve({ ok: false });
+    }
+    if (url.includes('collision_data.json')) {
+      if (collisionData) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(collisionData) });
       }
       return Promise.resolve({ ok: false });
     }
@@ -101,11 +107,20 @@ describe('Environment', () => {
       expect(typeof mod.loadEnvironment).toBe('function');
     });
 
-    it('fetches doodad data and manifest', async () => {
+    it('fetches doodad data, manifest, and collision data', async () => {
       mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD);
       await mod.loadEnvironment();
       expect(global.fetch).toHaveBeenCalledWith('/assets/terrain/northshire_doodads.json');
       expect(global.fetch).toHaveBeenCalledWith('/assets/models/doodad_manifest.json');
+      expect(global.fetch).toHaveBeenCalledWith('/assets/models/collision_data.json');
+    });
+
+    it('handles collision data fetch failure gracefully', async () => {
+      mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD, null);
+      await mod.loadEnvironment();
+      const group = await mod.createEnvironment();
+      // Should still populate visuals even without collision data
+      expect(group.children.length).toBeGreaterThan(0);
     });
 
     it('handles manifest fetch failure gracefully', async () => {
@@ -510,6 +525,65 @@ describe('Environment', () => {
         expect(child.castShadow).toBe(true);
         expect(child.receiveShadow).toBe(true);
       }
+    });
+  });
+
+  // ── Collision registration ──
+
+  describe('collision registration', () => {
+    // Simple triangle mesh: a small square at origin in glTF Y-up coords
+    // verts: (0,0,0), (2,0,0), (2,2,0), (0,2,0) — flat on XZ at y=0
+    const COLLISION_DATA = {
+      'trees/oak.m2': {
+        verts: [0, 0, 0, 2, 0, 0, 2, 0, 2, 0, 0, 2], // 4 verts: xyzxyzxyzxyz
+        tris: [0, 1, 2, 0, 2, 3], // 2 triangles
+      },
+      'buildings/abbey.wmo': {
+        verts: [-5, 0, -5, 5, 0, -5, 5, 5, 5, -5, 5, 5],
+        tris: [0, 1, 2, 0, 2, 3],
+      },
+    };
+
+    it('registers doodad trimesh colliders when collision data is present', async () => {
+      mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD, COLLISION_DATA);
+      await mod.loadEnvironment();
+      await mod.createEnvironment();
+      await flushAsync();
+
+      // Import collision system to check registrations
+      const collisionMod = await import('../../client/world/CollisionSystem.js');
+      const stats = collisionMod.getStats();
+      // Collision data for oak.m2 has Y-extent of 0 (flat) → skipped (maxY - minY < 0.2)
+      // Collision data for abbey.wmo has Y-extent of 5 → should register
+      expect(stats.colliderCount).toBeGreaterThan(0);
+    });
+
+    it('does not crash when collision data is missing for a model', async () => {
+      // Only provide collision data for oak, not for abbey
+      const partialCollision = {
+        'trees/oak.m2': COLLISION_DATA['trees/oak.m2'],
+      };
+      mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD, partialCollision);
+      await mod.loadEnvironment();
+
+      // Should not throw
+      const group = await mod.createEnvironment();
+      await flushAsync();
+      expect(group.children.length).toBeGreaterThan(0);
+    });
+
+    it('still places visuals even if collision registration throws', async () => {
+      // Provide malformed collision data that would cause errors
+      const badCollision = {
+        'trees/oak.m2': { verts: null, tris: null },
+      };
+      mockFetchWith(DOODAD_PAYLOAD, MANIFEST_PAYLOAD, badCollision);
+      await mod.loadEnvironment();
+
+      const group = await mod.createEnvironment();
+      await flushAsync();
+      // Visual placement should still work
+      expect(group.children.length).toBeGreaterThan(0);
     });
   });
 

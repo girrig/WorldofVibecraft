@@ -811,5 +811,8 @@
     "world/wmo/azeroth/buildings/magetower/magetower.wmo": {
       "glb": "wmos/magetower.glb"
     }
-  }
+  },
+  "totalWmoExtracted": 22,
+  "totalWmoSkipped": 0,
+  "totalWmoFailed": 1
 }

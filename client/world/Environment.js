@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WORLD_SIZE } from '../../shared/constants.js';
-import { addAABBCollider, addTrimeshCollider, finalize as finalizeCollision } from './CollisionSystem.js';
+import { addTrimeshCollider, finalize as finalizeCollision } from './CollisionSystem.js';
 
 // ── Module state ──
 let doodadData = null;
@@ -79,70 +79,69 @@ function registerDoodadColliders(modelPath, instances) {
   }
 }
 
-function registerWMOColliderFromGLB(wmo, gltf) {
-  // Build the WMO placement matrix (same transform as visual placement)
-  const placement = new THREE.Object3D();
-  placement.position.set(wmo.x, wmo.y, wmo.z);
-  placement.rotation.set(
+function registerWMOColliders(modelPath, wmo) {
+  // Use Blizzard's actual WMO collision mesh triangles (extracted from MPQ MOPY flags)
+  const meshData = collisionMeshes?.[modelPath];
+  if (!meshData) return;
+
+  const modelVerts = meshData.verts; // flat [x0,y0,z0, ...] in glTF Y-up
+  const triIndices = meshData.tris;  // flat [i0,i1,i2, ...] triangle indices
+  if (!modelVerts || modelVerts.length < 9) return;
+  if (!triIndices || triIndices.length < 3) return;
+
+  const numVerts = modelVerts.length / 3;
+  const numTris = triIndices.length / 3;
+
+  const s = wmo.scale || 1.0;
+
+  const rotHelper = new THREE.Object3D();
+  rotHelper.rotation.set(
     (wmo.rotX || 0) * Math.PI / 180,
     (wmo.rotY || 0) * Math.PI / 180,
     -(wmo.rotZ || 0) * Math.PI / 180,
     'YZX'
   );
-  placement.scale.setScalar(wmo.scale || 1.0);
-  placement.updateMatrix();
+  rotHelper.updateMatrix();
 
-  gltf.scene.updateMatrixWorld(true);
-
-  // Rasterize all mesh vertices onto a 2D XZ grid.
-  // Cells with vertically-spanning geometry become wall colliders;
-  // empty cells (doorways, interiors) remain passable.
-  const CELL = 1.5;
-  const grid = new Map();
   const v = new THREE.Vector3();
 
-  gltf.scene.traverse((child) => {
-    if (!child.isMesh || !child.geometry) return;
-    const pos = child.geometry.attributes.position;
-    if (!pos) return;
+  // Transform all collision vertices to world space
+  const wx = new Float32Array(numVerts);
+  const wy = new Float32Array(numVerts);
+  const wz = new Float32Array(numVerts);
+  let minY = Infinity, maxY = -Infinity;
 
-    const combinedMatrix = new THREE.Matrix4();
-    combinedMatrix.multiplyMatrices(placement.matrix, child.matrixWorld);
-
-    const arr = pos.array;
-    for (let i = 0; i < pos.count; i++) {
-      v.set(arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]);
-      v.applyMatrix4(combinedMatrix);
-
-      const gx = Math.floor(v.x / CELL);
-      const gz = Math.floor(v.z / CELL);
-      const key = `${gx},${gz}`;
-
-      let cell = grid.get(key);
-      if (!cell) {
-        cell = { gx, gz, minY: v.y, maxY: v.y, count: 0 };
-        grid.set(key, cell);
-      }
-      if (v.y < cell.minY) cell.minY = v.y;
-      if (v.y > cell.maxY) cell.maxY = v.y;
-      cell.count++;
-    }
-  });
-
-  // Create AABB colliders for grid cells with wall-like geometry
-  for (const cell of grid.values()) {
-    const h = cell.maxY - cell.minY;
-    // Must have significant vertical extent (skip floor/ceiling-only cells)
-    if (h < 1.0) continue;
-    // Must have enough vertices to be a real structure
-    if (cell.count < 4) continue;
-
-    addAABBCollider(
-      cell.gx * CELL, cell.gz * CELL,
-      (cell.gx + 1) * CELL, (cell.gz + 1) * CELL,
-      cell.minY, cell.maxY
+  for (let i = 0; i < numVerts; i++) {
+    v.set(
+      modelVerts[i * 3] * s,
+      modelVerts[i * 3 + 1] * s,
+      modelVerts[i * 3 + 2] * s
     );
+    v.applyMatrix4(rotHelper.matrix);
+    wx[i] = v.x + wmo.x;
+    wy[i] = v.y + wmo.y;
+    wz[i] = v.z + wmo.z;
+    if (wy[i] < minY) minY = wy[i];
+    if (wy[i] > maxY) maxY = wy[i];
   }
+
+  if (maxY - minY < 0.2) return;
+
+  // Build XZ triangle array (6 floats per tri: ax,az, bx,bz, cx,cz)
+  const tris = new Float32Array(numTris * 6);
+  for (let t = 0; t < numTris; t++) {
+    const i0 = triIndices[t * 3];
+    const i1 = triIndices[t * 3 + 1];
+    const i2 = triIndices[t * 3 + 2];
+    tris[t * 6]     = wx[i0];
+    tris[t * 6 + 1] = wz[i0];
+    tris[t * 6 + 2] = wx[i1];
+    tris[t * 6 + 3] = wz[i1];
+    tris[t * 6 + 4] = wx[i2];
+    tris[t * 6 + 5] = wz[i2];
+  }
+
+  addTrimeshCollider(tris, minY, maxY);
 }
 
 /**
@@ -412,9 +411,9 @@ async function loadAndPlaceWMO(group, wmo) {
     try {
       const gltf = await loadGLB('/assets/models/' + glbInfo.glb);
 
-      // Register AABB collision from actual model geometry
+      // Register collision from WMO's actual MOPY-flagged triangles
       try {
-        registerWMOColliderFromGLB(wmo, gltf);
+        registerWMOColliders(wmo.model, wmo);
       } catch (e) {
         // Collision registration failure shouldn't prevent visual placement
       }
