@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RUN_SPEED, WALK_FACTOR, BACKPEDAL_FACTOR, TURN_SPEED, GRAVITY, JUMP_VELOCITY, WORLD_SIZE } from '../../shared/constants.js';
 import { getTerrainHeight } from '../world/Terrain.js';
+import { resolveMovement } from '../world/CollisionSystem.js';
 import { getPlayerColor, createPlayerMesh } from './PlayerModel.js';
 
 export { preloadPlayerModel } from './PlayerModel.js';
@@ -106,13 +107,22 @@ export class LocalPlayer {
       groundVelZ = dir.z * speed;
     }
 
+    let dx = 0, dz = 0;
     if (this.grounded) {
-      this.position.x += groundVelX * dt;
-      this.position.z += groundVelZ * dt;
+      dx = groundVelX * dt;
+      dz = groundVelZ * dt;
     } else if (this.airVelocity) {
-      // In the air: use locked-in velocity from takeoff
-      this.position.x += this.airVelocity.x * dt;
-      this.position.z += this.airVelocity.z * dt;
+      dx = this.airVelocity.x * dt;
+      dz = this.airVelocity.z * dt;
+    }
+    if (dx !== 0 || dz !== 0) {
+      const resolved = resolveMovement(
+        this.position.x, this.position.z,
+        this.position.x + dx, this.position.z + dz,
+        this.position.y
+      );
+      this.position.x = resolved.x;
+      this.position.z = resolved.z;
     }
 
     // --- Animation state ---

@@ -200,6 +200,48 @@ def read_m2array(data, offset):
     return count, ofs
 
 
+def parse_m2_collision(data):
+    """Parse M2 collision mesh (bounding/collision geometry).
+
+    Returns (vertices, triangles) where:
+      vertices: list of (x, y, z) tuples in WoW coordinate space (Z-up)
+      triangles: flat list of uint16 indices (every 3 consecutive = one triangle)
+    Returns ([], []) if no collision data present.
+
+    Header offsets (WotLK 3.3.5a M2):
+      0x0D8: collision_triangles (M2Array of uint16)
+      0x0E0: collision_vertices  (M2Array of C3Vector = 3 floats each)
+      0x0E8: collision_normals   (M2Array of C3Vector) [not used here]
+    """
+    if len(data) < 0x0E8:
+        return [], []
+
+    n_tris, ofs_tris = read_m2array(data, 0x0D8)
+    n_verts, ofs_verts = read_m2array(data, 0x0E0)
+
+    if n_verts == 0 or n_tris == 0:
+        return [], []
+
+    # Sanity checks
+    if n_verts > 100000 or n_tris > 300000:
+        return [], []
+    if ofs_verts + n_verts * 12 > len(data):
+        return [], []
+    if ofs_tris + n_tris * 2 > len(data):
+        return [], []
+
+    # Parse vertices (C3Vector = 3 floats each, 12 bytes)
+    vertices = []
+    for i in range(n_verts):
+        x, y, z = struct.unpack_from("<3f", data, ofs_verts + i * 12)
+        vertices.append((x, y, z))
+
+    # Parse triangle indices (uint16 each)
+    triangles = list(struct.unpack_from(f"<{n_tris}H", data, ofs_tris))
+
+    return vertices, triangles
+
+
 def parse_m2_vertices(data, header_offset=0x03C):
     """Parse M2 vertex data. Returns list of vertex dicts."""
     count, offset = read_m2array(data, header_offset)

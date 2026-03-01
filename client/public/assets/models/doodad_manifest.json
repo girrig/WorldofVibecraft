@@ -741,27 +741,66 @@
       "instances": 1
     }
   },
-  "totalExtracted": 16,
+  "totalExtracted": 0,
   "totalFailed": 0,
-  "totalSkipped": 169,
+  "totalSkipped": 185,
   "wmos": {
-    "world/wmo/azeroth/buildings/goldshireblacksmith/goldshireblacksmith.wmo": {
-      "glb": "wmos/goldshireblacksmith.glb"
-    },
     "world/wmo/azeroth/buildings/human_farm/farm.wmo": {
       "glb": "wmos/farm.glb"
     },
-    "world/wmo/azeroth/buildings/humanhouses/elwynnhouse_large.wmo": {
-      "glb": "wmos/elwynnhouse_large.glb"
+    "world/wmo/dungeon/md_goldmine/md_goldmine.wmo": {
+      "glb": "wmos/md_goldmine.glb"
+    },
+    "world/wmo/dungeon/md_caveden/md_volcanicden.wmo": {
+      "glb": "wmos/md_volcanicden.glb"
+    },
+    "world/wmo/azeroth/buildings/keepwall/wallpost01.wmo": {
+      "glb": "wmos/wallpost01.glb"
+    },
+    "world/wmo/azeroth/buildings/keepwall/wallpiece01.wmo": {
+      "glb": "wmos/wallpiece01.glb"
+    },
+    "world/wmo/azeroth/collidable doodads/elwynn/abbeygate/abbeygate01.wmo": {
+      "glb": "wmos/abbeygate01.glb"
+    },
+    "world/wmo/azeroth/buildings/redridge_stable/redridge_stable.wmo": {
+      "glb": "wmos/redridge_stable.glb"
+    },
+    "world/wmo/azeroth/collidable doodads/elwynn/widebridge/elwynnwidebridge.wmo": {
+      "glb": "wmos/elwynnwidebridge.glb"
+    },
+    "world/wmo/azeroth/buildings/nsabbey/nsabbey.wmo": {
+      "glb": "wmos/nsabbey.glb"
+    },
+    "world/wmo/azeroth/buildings/large_human_farm/large_human_farm.wmo": {
+      "glb": "wmos/large_human_farm.glb"
+    },
+    "world/wmo/azeroth/collidable doodads/elwynn/abbeygate02/abbeygate02.wmo": {
+      "glb": "wmos/abbeygate02.glb"
+    },
+    "world/wmo/dungeon/md_spidermine/md_spidermine.wmo": {
+      "glb": "wmos/md_spidermine.glb"
+    },
+    "world/wmo/dungeon/md_animalden/animalden.wmo": {
+      "glb": "wmos/animalden.glb"
+    },
+    "world/wmo/azeroth/buildings/westfall_human_farm_burnt/westfallfarmhouseburnt.wmo": {
+      "glb": "wmos/westfallfarmhouseburnt.glb"
     },
     "world/wmo/azeroth/buildings/humanhouses/elwynnhouse_medium.wmo": {
       "glb": "wmos/elwynnhouse_medium.glb"
     },
-    "world/wmo/azeroth/buildings/humanhouses/elwynnhouse_mediumalt.wmo": {
-      "glb": "wmos/elwynnhouse_mediumalt.glb"
-    },
     "world/wmo/azeroth/buildings/humanhouses/elwynnhouse_small.wmo": {
       "glb": "wmos/elwynnhouse_small.glb"
+    },
+    "world/wmo/azeroth/buildings/goldshireblacksmith/goldshireblacksmith.wmo": {
+      "glb": "wmos/goldshireblacksmith.glb"
+    },
+    "world/wmo/azeroth/buildings/humanhouses/elwynnhouse_large.wmo": {
+      "glb": "wmos/elwynnhouse_large.glb"
+    },
+    "world/wmo/azeroth/buildings/humanhouses/elwynnhouse_mediumalt.wmo": {
+      "glb": "wmos/elwynnhouse_mediumalt.glb"
     },
     "world/wmo/azeroth/buildings/humanhouses/elwynnhouseinn.wmo": {
       "glb": "wmos/elwynnhouseinn.glb"
@@ -769,50 +808,8 @@
     "world/wmo/azeroth/buildings/humantwostory/humantwostory.wmo": {
       "glb": "wmos/humantwostory.glb"
     },
-    "world/wmo/azeroth/buildings/keepwall/wallpiece01.wmo": {
-      "glb": "wmos/wallpiece01.glb"
-    },
-    "world/wmo/azeroth/buildings/keepwall/wallpost01.wmo": {
-      "glb": "wmos/wallpost01.glb"
-    },
-    "world/wmo/azeroth/buildings/large_human_farm/large_human_farm.wmo": {
-      "glb": "wmos/large_human_farm.glb"
-    },
     "world/wmo/azeroth/buildings/magetower/magetower.wmo": {
       "glb": "wmos/magetower.glb"
-    },
-    "world/wmo/azeroth/buildings/nsabbey/nsabbey.wmo": {
-      "glb": "wmos/nsabbey.glb"
-    },
-    "world/wmo/azeroth/buildings/redridge_stable/redridge_stable.wmo": {
-      "glb": "wmos/redridge_stable.glb"
-    },
-    "world/wmo/azeroth/buildings/westfall_human_farm_burnt/westfallfarmhouseburnt.wmo": {
-      "glb": "wmos/westfallfarmhouseburnt.glb"
-    },
-    "world/wmo/azeroth/collidable doodads/elwynn/abbeygate/abbeygate01.wmo": {
-      "glb": "wmos/abbeygate01.glb"
-    },
-    "world/wmo/azeroth/collidable doodads/elwynn/abbeygate02/abbeygate02.wmo": {
-      "glb": "wmos/abbeygate02.glb"
-    },
-    "world/wmo/azeroth/collidable doodads/elwynn/widebridge/elwynnwidebridge.wmo": {
-      "glb": "wmos/elwynnwidebridge.glb"
-    },
-    "world/wmo/dungeon/md_animalden/animalden.wmo": {
-      "glb": "wmos/animalden.glb"
-    },
-    "world/wmo/dungeon/md_caveden/md_volcanicden.wmo": {
-      "glb": "wmos/md_volcanicden.glb"
-    },
-    "world/wmo/dungeon/md_goldmine/md_goldmine.wmo": {
-      "glb": "wmos/md_goldmine.glb"
-    },
-    "world/wmo/dungeon/md_spidermine/md_spidermine.wmo": {
-      "glb": "wmos/md_spidermine.glb"
     }
-  },
-  "totalWmoExtracted": 0,
-  "totalWmoSkipped": 22,
-  "totalWmoFailed": 0
+  }
 }

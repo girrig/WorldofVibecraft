@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { MSG, SPAWN_AREA, SPAWN_POINT } from '../shared/constants.js';
 import { createTerrain } from './world/Terrain.js';
 import { createEnvironment, createLighting, createSky } from './world/Environment.js';
+import { createDebugMeshes } from './world/CollisionSystem.js';
 import { LocalPlayer } from './entities/Player.js';
 import { RemotePlayer } from './entities/RemotePlayer.js';
 import { PlayerControls } from './controls/PlayerControls.js';
@@ -75,6 +76,11 @@ export class Game {
     const envGroup = await createEnvironment();
     this.scene.add(envGroup);
     console.log('Environment ready!');
+
+    // Collision debug wireframes (toggle with F3)
+    this.collisionDebug = createDebugMeshes();
+    this.collisionDebug.visible = false;
+    this.scene.add(this.collisionDebug);
 
     // Local player
     this.localPlayer = new LocalPlayer(welcomeData.id, name);
@@ -219,6 +225,15 @@ export class Game {
       }
 
       if (key === ' ') e.preventDefault();
+
+      // F3 toggles collision debug wireframes
+      if (key === 'f3') {
+        e.preventDefault();
+        if (this.collisionDebug) {
+          this.collisionDebug.visible = !this.collisionDebug.visible;
+        }
+        return;
+      }
 
       this.localPlayer.setKey(key, true);
 

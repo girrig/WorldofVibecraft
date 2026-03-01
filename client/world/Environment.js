@@ -1,25 +1,166 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WORLD_SIZE } from '../../shared/constants.js';
+import { addAABBCollider, addTrimeshCollider, finalize as finalizeCollision } from './CollisionSystem.js';
 
 // ── Module state ──
 let doodadData = null;
 let manifest = null;
+let collisionMeshes = null;
 const modelCache = new Map();
 const loadingModels = new Map();
+
+// ── Collision helpers ──
+
+function registerDoodadColliders(modelPath, instances) {
+  // Use Blizzard's actual M2 collision mesh triangles (extracted from MPQ)
+  const meshData = collisionMeshes?.[modelPath];
+  if (!meshData) return; // No collision data = non-collidable (bushes, birds, etc.)
+
+  const modelVerts = meshData.verts; // flat [x0,y0,z0, ...] in glTF Y-up
+  const triIndices = meshData.tris;  // flat [i0,i1,i2, ...] triangle indices
+  if (!modelVerts || modelVerts.length < 9) return;
+  if (!triIndices || triIndices.length < 3) return;
+
+  const numVerts = modelVerts.length / 3;
+  const numTris = triIndices.length / 3;
+
+  const rotHelper = new THREE.Object3D();
+  const v = new THREE.Vector3();
+
+  for (const d of instances) {
+    const s = d.scale || 1.0;
+
+    rotHelper.rotation.set(
+      (d.rotX || 0) * Math.PI / 180,
+      (d.rotY || 0) * Math.PI / 180,
+      -(d.rotZ || 0) * Math.PI / 180,
+      'YZX'
+    );
+    rotHelper.updateMatrix();
+
+    // Transform all collision vertices to world space
+    const wx = new Float32Array(numVerts);
+    const wy = new Float32Array(numVerts);
+    const wz = new Float32Array(numVerts);
+    let minY = Infinity, maxY = -Infinity;
+
+    for (let i = 0; i < numVerts; i++) {
+      v.set(
+        modelVerts[i * 3] * s,
+        modelVerts[i * 3 + 1] * s,
+        modelVerts[i * 3 + 2] * s
+      );
+      v.applyMatrix4(rotHelper.matrix);
+      wx[i] = v.x + d.x;
+      wy[i] = v.y + d.y;
+      wz[i] = v.z + d.z;
+      if (wy[i] < minY) minY = wy[i];
+      if (wy[i] > maxY) maxY = wy[i];
+    }
+
+    if (maxY - minY < 0.2) continue;
+
+    // Build XZ triangle array (6 floats per tri: ax,az, bx,bz, cx,cz)
+    const tris = new Float32Array(numTris * 6);
+    for (let t = 0; t < numTris; t++) {
+      const i0 = triIndices[t * 3];
+      const i1 = triIndices[t * 3 + 1];
+      const i2 = triIndices[t * 3 + 2];
+      tris[t * 6]     = wx[i0];
+      tris[t * 6 + 1] = wz[i0];
+      tris[t * 6 + 2] = wx[i1];
+      tris[t * 6 + 3] = wz[i1];
+      tris[t * 6 + 4] = wx[i2];
+      tris[t * 6 + 5] = wz[i2];
+    }
+
+    addTrimeshCollider(tris, minY, maxY);
+  }
+}
+
+function registerWMOColliderFromGLB(wmo, gltf) {
+  // Build the WMO placement matrix (same transform as visual placement)
+  const placement = new THREE.Object3D();
+  placement.position.set(wmo.x, wmo.y, wmo.z);
+  placement.rotation.set(
+    (wmo.rotX || 0) * Math.PI / 180,
+    (wmo.rotY || 0) * Math.PI / 180,
+    -(wmo.rotZ || 0) * Math.PI / 180,
+    'YZX'
+  );
+  placement.scale.setScalar(wmo.scale || 1.0);
+  placement.updateMatrix();
+
+  gltf.scene.updateMatrixWorld(true);
+
+  // Rasterize all mesh vertices onto a 2D XZ grid.
+  // Cells with vertically-spanning geometry become wall colliders;
+  // empty cells (doorways, interiors) remain passable.
+  const CELL = 1.5;
+  const grid = new Map();
+  const v = new THREE.Vector3();
+
+  gltf.scene.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    const pos = child.geometry.attributes.position;
+    if (!pos) return;
+
+    const combinedMatrix = new THREE.Matrix4();
+    combinedMatrix.multiplyMatrices(placement.matrix, child.matrixWorld);
+
+    const arr = pos.array;
+    for (let i = 0; i < pos.count; i++) {
+      v.set(arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]);
+      v.applyMatrix4(combinedMatrix);
+
+      const gx = Math.floor(v.x / CELL);
+      const gz = Math.floor(v.z / CELL);
+      const key = `${gx},${gz}`;
+
+      let cell = grid.get(key);
+      if (!cell) {
+        cell = { gx, gz, minY: v.y, maxY: v.y, count: 0 };
+        grid.set(key, cell);
+      }
+      if (v.y < cell.minY) cell.minY = v.y;
+      if (v.y > cell.maxY) cell.maxY = v.y;
+      cell.count++;
+    }
+  });
+
+  // Create AABB colliders for grid cells with wall-like geometry
+  for (const cell of grid.values()) {
+    const h = cell.maxY - cell.minY;
+    // Must have significant vertical extent (skip floor/ceiling-only cells)
+    if (h < 1.0) continue;
+    // Must have enough vertices to be a real structure
+    if (cell.count < 4) continue;
+
+    addAABBCollider(
+      cell.gx * CELL, cell.gz * CELL,
+      (cell.gx + 1) * CELL, (cell.gz + 1) * CELL,
+      cell.minY, cell.maxY
+    );
+  }
+}
 
 /**
  * Async loader — call in startGame() alongside loadTerrain().
  * Loads doodad placement data and model manifest in parallel.
  */
 export async function loadEnvironment() {
-  const [doodadResp, manifestResp] = await Promise.all([
+  const [doodadResp, manifestResp, collisionResp] = await Promise.all([
     fetch('/assets/terrain/northshire_doodads.json'),
     fetch('/assets/models/doodad_manifest.json').catch(() => null),
+    fetch('/assets/models/collision_data.json').catch(() => null),
   ]);
   doodadData = await doodadResp.json();
   if (manifestResp && manifestResp.ok) {
     manifest = await manifestResp.json();
+  }
+  if (collisionResp && collisionResp.ok) {
+    collisionMeshes = await collisionResp.json();
   }
 }
 
@@ -207,6 +348,13 @@ async function loadAndPlaceModel(group, modelPath, instances) {
     try {
       const gltf = await loadGLB('/assets/models/' + glbInfo.glb);
 
+      // Register collision shapes from M2 collision mesh data
+      try {
+        registerDoodadColliders(modelPath, instances);
+      } catch (e) {
+        // Collision registration failure shouldn't prevent visual placement
+      }
+
       // Collect ALL meshes (trunk + canopy, etc.)
       const meshParts = [];
       gltf.scene.traverse((child) => {
@@ -263,6 +411,14 @@ async function loadAndPlaceWMO(group, wmo) {
   if (glbInfo) {
     try {
       const gltf = await loadGLB('/assets/models/' + glbInfo.glb);
+
+      // Register AABB collision from actual model geometry
+      try {
+        registerWMOColliderFromGLB(wmo, gltf);
+      } catch (e) {
+        // Collision registration failure shouldn't prevent visual placement
+      }
+
       const model = gltf.scene.clone();
 
       // Use Y coordinate from ADT data (more accurate than terrain mesh)
@@ -324,6 +480,7 @@ export async function createEnvironment() {
     console.warn('Environment population error:', err)
   );
 
+  finalizeCollision();
   return group;
 }
 

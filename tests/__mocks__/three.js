@@ -37,6 +37,15 @@ export class Vector3 {
     return this;
   }
   setScalar(s) { this.x = s; this.y = s; this.z = s; return this; }
+  applyMatrix4(m) {
+    const e = m.elements;
+    const x = this.x, y = this.y, z = this.z;
+    const w = 1 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
+    this.x = (e[0] * x + e[4] * y + e[8] * z + e[12]) * w;
+    this.y = (e[1] * x + e[5] * y + e[9] * z + e[13]) * w;
+    this.z = (e[2] * x + e[6] * y + e[10] * z + e[14]) * w;
+    return this;
+  }
 }
 
 function makeMatrix16() {
@@ -228,6 +237,10 @@ export class MeshStandardMaterial {
   constructor(opts = {}) { Object.assign(this, opts); this.map = null; }
   dispose() {}
 }
+export class MeshBasicMaterial {
+  constructor(opts = {}) { Object.assign(this, opts); }
+  dispose() {}
+}
 export class SpriteMaterial {
   constructor(opts = {}) { Object.assign(this, opts); }
   dispose() {}
@@ -356,6 +369,56 @@ export class PerspectiveCamera {
   }
   lookAt() {}
   updateProjectionMatrix() {}
+}
+
+// Matrix4
+export class Matrix4 {
+  constructor() {
+    this.elements = new Float32Array(16);
+    this.elements[0] = this.elements[5] = this.elements[10] = this.elements[15] = 1;
+  }
+  multiplyMatrices(a, b) {
+    const ae = a.elements, be = b.elements, te = this.elements;
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        te[i + j * 4] = ae[i] * be[j * 4] + ae[i + 4] * be[j * 4 + 1] +
+                         ae[i + 8] * be[j * 4 + 2] + ae[i + 12] * be[j * 4 + 3];
+      }
+    }
+    return this;
+  }
+  toArray(target, offset = 0) {
+    for (let i = 0; i < 16; i++) target[offset + i] = this.elements[i];
+  }
+}
+
+// Box3
+export class Box3 {
+  constructor() {
+    this.min = new Vector3(Infinity, Infinity, Infinity);
+    this.max = new Vector3(-Infinity, -Infinity, -Infinity);
+  }
+  union(box) {
+    this.min.x = Math.min(this.min.x, box.min.x);
+    this.min.y = Math.min(this.min.y, box.min.y);
+    this.min.z = Math.min(this.min.z, box.min.z);
+    this.max.x = Math.max(this.max.x, box.max.x);
+    this.max.y = Math.max(this.max.y, box.max.y);
+    this.max.z = Math.max(this.max.z, box.max.z);
+    return this;
+  }
+  getSize(target) {
+    target.x = this.max.x - this.min.x;
+    target.y = this.max.y - this.min.y;
+    target.z = this.max.z - this.min.z;
+    return target;
+  }
+  getCenter(target) {
+    target.x = (this.min.x + this.max.x) * 0.5;
+    target.y = (this.min.y + this.max.y) * 0.5;
+    target.z = (this.min.z + this.max.z) * 0.5;
+    return target;
+  }
 }
 
 // Quaternion
